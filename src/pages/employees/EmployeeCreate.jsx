@@ -7,7 +7,7 @@ import {
     Paper
 } from "@mui/material";
 
-import { createEmployee } from "../../services/employeeService";
+import employeeService from "../../services/employeeService";
 
 function EmployeeCreate() {
 
@@ -32,7 +32,7 @@ function EmployeeCreate() {
     const handleSubmit = async () => {
         try {
 
-            await createEmployee({
+            await employeeService.createEmployee({
                 ...employee,
                 createdAt: new Date()
             });

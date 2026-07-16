@@ -18,9 +18,6 @@ export const designationSchema = yup.object().shape({
 
 export const locationSchema = yup.object().shape({
     name: yup.string().trim().required("Location Name is required").min(2, "Name must be at least 2 characters").max(50, "Name cannot exceed 50 characters"),
-    building: yup.string().trim().required("Building is required").max(50, "Building name too long"),
-    floor: yup.string().trim().required("Floor is required").max(10, "Floor too long"),
-    description: yup.string().trim().max(200, "Description cannot exceed 200 characters"),
     active: yup.boolean().default(true)
 });
 

@@ -1,6 +1,5 @@
 import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../config/firebase";
-import auditService from "./auditService";
 
 const COLLECTION_NAME = "assetCategories";
 
@@ -42,9 +41,6 @@ export const assetCategoryService = {
             };
             const docRef = await addDoc(collection(db, COLLECTION_NAME), docData);
             
-            // Audit Log
-            await auditService.logActivity("CREATE", COLLECTION_NAME, docRef.id, null, docData);
-            
             return { id: docRef.id, ...docData };
         } catch (error) {
             console.error("Error in createCategory:", error);
@@ -74,9 +70,6 @@ export const assetCategoryService = {
 
             await updateDoc(docRef, updateData);
             
-            // Audit Log
-            await auditService.logActivity("UPDATE", COLLECTION_NAME, id, oldValue, { ...oldValue, ...updateData });
-
             return { id, ...oldValue, ...updateData };
         } catch (error) {
             console.error("Error in updateCategory:", error);
@@ -101,9 +94,6 @@ export const assetCategoryService = {
             }
 
             await deleteDoc(docRef);
-
-            // Audit Log
-            await auditService.logActivity("DELETE", COLLECTION_NAME, id, oldValue, null);
 
             return id;
         } catch (error) {

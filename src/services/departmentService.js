@@ -1,6 +1,6 @@
 import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc, query, where } from "firebase/firestore";
 import { db } from "../config/firebase";
-import auditService from "./auditService";
+
 
 const COLLECTION_NAME = "departments";
 
@@ -34,26 +34,63 @@ export const departmentService = {
 
     createDepartment: async (data) => {
         try {
-            // Check duplicate department code
-            const q = query(collection(db, COLLECTION_NAME), where("code", "==", data.code));
+
+            console.log("Creating department:", data);
+
+            const q = query(
+                collection(db, COLLECTION_NAME),
+                where("code", "==", data.code)
+            );
+
+            console.log("Creating department:1", q);
+
             const querySnap = await getDocs(q);
+
+            console.log("Duplicate check result:", querySnap);
+
+
             if (!querySnap.empty) {
-                throw new Error(`Department Code "${data.code}" already exists.`);
+                throw new Error(
+                    `Department Code "${data.code}" already exists.`
+                );
             }
+
 
             const docData = {
                 ...data,
                 active: data.active ?? true,
                 createdAt: new Date().toISOString()
             };
-            const docRef = await addDoc(collection(db, COLLECTION_NAME), docData);
-            
-            // Audit Log
-            await auditService.logActivity("CREATE", COLLECTION_NAME, docRef.id, null, docData);
-            
-            return { id: docRef.id, ...docData };
+
+
+            console.log("Saving data:", docData);
+
+
+            const docRef = await addDoc(
+                collection(db, COLLECTION_NAME),
+                docData
+            );
+
+
+            console.log(
+                "Document created with ID:",
+                docRef.id
+            );
+
+
+            return {
+                id: docRef.id,
+                ...docData
+            };
+
+
         } catch (error) {
-            console.error("Error in createDepartment:", error);
+
+            console.error(
+                "CREATE DEPARTMENT ERROR:",
+                error
+            );
+
             throw error;
         }
     },
@@ -82,9 +119,8 @@ export const departmentService = {
             };
 
             await updateDoc(docRef, updateData);
-            
-            // Audit Log
-            await auditService.logActivity("UPDATE", COLLECTION_NAME, id, oldValue, { ...oldValue, ...updateData });
+
+
 
             return { id, ...oldValue, ...updateData };
         } catch (error) {
@@ -104,8 +140,7 @@ export const departmentService = {
 
             await deleteDoc(docRef);
 
-            // Audit Log
-            await auditService.logActivity("DELETE", COLLECTION_NAME, id, oldValue, null);
+
 
             return id;
         } catch (error) {

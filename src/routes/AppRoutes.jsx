@@ -4,29 +4,29 @@ import {
 } from "react-router-dom";
 
 
-import Login from "../pages/Login";
-
-import Dashboard from "../pages/Dashboard";
-
-
+import Login from "../pages/Login/index";
+import Dashboard from "../pages/Dashboard/index";
 import Layout from "../components/layout/Layout";
 
+import Employees from "../pages/employees/index";
+import Departments from "../pages/Departments/index";
+import Designations from "../pages/Designations/index";
+import Locations from "../pages/Locations/index";
+import AssetCategories from "../pages/AssetCategories/index";
+import Assets from "../pages/Assets/index";
 
-import EmployeeList from "../pages/employees/EmployeeList";
-
-import EmployeeCreate from "../pages/employees/EmployeeCreate";
-
-import EmployeeEdit from "../pages/employees/EmployeeEdit";
+import ProtectedRoute from "./ProtectedRoute";
 
 
 
 function AppRoutes() {
 
-
     return (
 
         <Routes>
 
+
+            {/* Public Route */}
 
             <Route
                 path="/"
@@ -35,37 +35,94 @@ function AppRoutes() {
 
 
 
-            <Route element={<Layout />}>
+            {/* Protected ERP Routes */}
+
+            <Route
+
+                element={
+
+                    <ProtectedRoute>
+
+                        <Layout />
+
+                    </ProtectedRoute>
+
+                }
+
+            >
 
 
                 <Route
+
                     path="/dashboard"
+
                     element={<Dashboard />}
+
                 />
 
 
 
                 <Route
+
                     path="/employees"
-                    element={<EmployeeList />}
+
+                    element={<Employees />}
+
                 />
 
 
 
                 <Route
-                    path="/employees/create"
-                    element={<EmployeeCreate />}
+
+                    path="/departments"
+
+                    element={<Departments />}
+
                 />
 
 
 
                 <Route
-                    path="/employees/edit/:id"
-                    element={<EmployeeEdit />}
+
+                    path="/designations"
+
+                    element={<Designations />}
+
+                />
+
+
+
+                <Route
+
+                    path="/locations"
+
+                    element={<Locations />}
+
+                />
+
+
+
+                <Route
+
+                    path="/asset-categories"
+
+                    element={<AssetCategories />}
+
+                />
+
+
+
+                <Route
+
+                    path="/assets"
+
+                    element={<Assets />}
+
                 />
 
 
             </Route>
+
 
 
         </Routes>

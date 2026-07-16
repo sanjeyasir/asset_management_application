@@ -1,7 +1,5 @@
 import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc, query, where } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
-import { db, storage } from "../config/firebase";
-import auditService from "./auditService";
+import { db } from "../config/firebase";
 import emailService from "./emailService";
 
 const COLLECTION_NAME = "employees";
@@ -51,7 +49,7 @@ export const employeeService = {
         }
     },
 
-    createEmployee: async (data, file = null) => {
+    createEmployee: async (data) => {
         try {
             // Check for duplicate email
             const q = query(collection(db, COLLECTION_NAME), where("email", "==", data.email));
@@ -62,27 +60,17 @@ export const employeeService = {
 
             // Generate employeeId
             const employeeId = await generateNextEmployeeId();
-
-            let profilePicture = "";
-            if (file) {
-                const fileRef = ref(storage, `employees/${employeeId}_${Date.now()}_${file.name}`);
-                const uploadSnap = await uploadBytes(fileRef, file);
-                profilePicture = await getDownloadURL(uploadSnap.ref);
-            }
-
             const fullName = `${data.firstName || ""} ${data.lastName || ""}`.trim();
+            
             const docData = {
                 ...data,
                 employeeId,
                 fullName,
-                profilePicture,
+                profilePicture: "",
                 createdAt: new Date().toISOString()
             };
 
             const docRef = await addDoc(collection(db, COLLECTION_NAME), docData);
-
-            // Audit logging
-            await auditService.logActivity("CREATE", COLLECTION_NAME, docRef.id, null, docData);
 
             // Trigger Email notification
             emailService.sendEmployeeCreated(docData);
@@ -94,7 +82,7 @@ export const employeeService = {
         }
     },
 
-    updateEmployee: async (id, data, file = null) => {
+    updateEmployee: async (id, data) => {
         try {
             const docRef = doc(db, COLLECTION_NAME, id);
             const docSnap = await getDoc(docRef);
@@ -112,36 +100,16 @@ export const employeeService = {
                 }
             }
 
-            let profilePicture = oldValue.profilePicture || "";
-            if (file) {
-                // If there was an old file, try to delete it
-                if (oldValue.profilePicture && oldValue.profilePicture.includes("firebasestorage.googleapis.com")) {
-                    try {
-                        const oldRef = ref(storage, oldValue.profilePicture);
-                        await deleteObject(oldRef);
-                    } catch (e) {
-                        console.warn("Could not delete old profile picture:", e.message);
-                    }
-                }
-
-                const fileRef = ref(storage, `employees/${oldValue.employeeId}_${Date.now()}_${file.name}`);
-                const uploadSnap = await uploadBytes(fileRef, file);
-                profilePicture = await getDownloadURL(uploadSnap.ref);
-            }
-
             const fullName = `${data.firstName || oldValue.firstName} ${data.lastName || oldValue.lastName}`.trim();
             const updateData = {
                 ...data,
                 fullName,
-                profilePicture,
                 updatedAt: new Date().toISOString()
             };
 
             await updateDoc(docRef, updateData);
 
             const merged = { ...oldValue, ...updateData };
-            // Audit logging
-            await auditService.logActivity("UPDATE", COLLECTION_NAME, id, oldValue, merged);
 
             return { id, ...merged };
         } catch (error) {
@@ -166,20 +134,7 @@ export const employeeService = {
                 throw new Error(`Cannot delete employee. They currently hold ${assetSnap.size} assigned asset(s). Return assets first.`);
             }
 
-            // Delete profile picture from storage if it exists
-            if (oldValue.profilePicture && oldValue.profilePicture.includes("firebasestorage.googleapis.com")) {
-                try {
-                    const picRef = ref(storage, oldValue.profilePicture);
-                    await deleteObject(picRef);
-                } catch (e) {
-                    console.warn("Could not delete profile picture during employee deletion:", e.message);
-                }
-            }
-
             await deleteDoc(docRef);
-
-            // Audit logging
-            await auditService.logActivity("DELETE", COLLECTION_NAME, id, oldValue, null);
 
             return id;
         } catch (error) {

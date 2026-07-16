@@ -1,6 +1,5 @@
 import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc, query, where } from "firebase/firestore";
 import { db } from "../config/firebase";
-import auditService from "./auditService";
 import emailService from "./emailService";
 
 const COLLECTION_NAME = "assets";
@@ -73,8 +72,7 @@ export const assetService = {
             const docRef = await addDoc(collection(db, COLLECTION_NAME), docData);
             const savedAsset = { id: docRef.id, ...docData };
 
-            // Audit logging
-            await auditService.logActivity("CREATE", COLLECTION_NAME, docRef.id, null, docData);
+
 
             // If assigned, trigger email
             if (docData.assignedEmployee) {
@@ -125,8 +123,7 @@ export const assetService = {
             await updateDoc(docRef, updateData);
             const mergedAsset = { ...oldValue, ...updateData };
 
-            // Audit logging
-            await auditService.logActivity("UPDATE", COLLECTION_NAME, id, oldValue, mergedAsset);
+
 
             // Handle Emails Triggering
             // 1. Assignment Email
@@ -175,8 +172,7 @@ export const assetService = {
 
             await deleteDoc(docRef);
 
-            // Audit logging
-            await auditService.logActivity("DELETE", COLLECTION_NAME, id, oldValue, null);
+
 
             return id;
         } catch (error) {

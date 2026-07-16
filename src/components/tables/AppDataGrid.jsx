@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { DataGrid } from "@mui/x-data-grid";
-import { Box, Skeleton, Paper } from "@mui/material";
+import { 
+    Box, Skeleton, Paper, Table, TableBody, TableCell, 
+    TableContainer, TableHead, TableRow, TablePagination 
+} from "@mui/material";
 import SearchToolbar from "./SearchToolbar";
 
 export function AppDataGrid({
@@ -14,7 +16,8 @@ export function AppDataGrid({
     ...props
 }) {
     const [searchText, setSearchText] = useState("");
-    const [columnVisibilityModel, setColumnVisibilityModel] = useState({});
+    const [page, setPage] = useState(0);
+    const [rowsPerPage, setRowsPerPage] = useState(5);
 
     // Filter rows based on quick search
     const filteredRows = rows.filter((row) => {
@@ -33,14 +36,19 @@ export function AppDataGrid({
         });
     });
 
+    const handleSearchChange = (text) => {
+        setSearchText(text);
+        setPage(0); // Reset page to 0 on new search query
+    };
+
     // Custom CSV Exporter using Blob
     const handleCSVExport = () => {
         const activeFields = columns
-            .filter((col) => col.field !== "__actions" && col.headerName)
+            .filter((col) => col.field !== "__actions" && col.field !== "actions" && col.headerName)
             .map((col) => col.field);
         
         const headers = columns
-            .filter((col) => col.field !== "__actions" && col.headerName)
+            .filter((col) => col.field !== "__actions" && col.field !== "actions" && col.headerName)
             .map((col) => col.headerName);
 
         const csvRows = [headers.join(",")];
@@ -48,7 +56,6 @@ export function AppDataGrid({
         filteredRows.forEach((row) => {
             const values = activeFields.map((field) => {
                 const val = row[field];
-                // Strip HTML or newlines and escape double quotes
                 const cellValue = val === null || val === undefined ? "" : String(val).replace(/\n/g, " ").replace(/"/g, '""');
                 return `"${cellValue}"`;
             });
@@ -66,28 +73,22 @@ export function AppDataGrid({
         document.body.removeChild(link);
     };
 
-    // Custom loading skeletons to display during loading
-    const LoadingSkeleton = () => (
-        <Box sx={{ p: 2, display: "flex", flexDirection: "column", gap: 1.5, height: "100%", width: "100%", boxSizing: "border-box" }}>
-            {[1, 2, 3, 4, 5].map((idx) => (
-                <Skeleton 
-                    key={idx} 
-                    variant="rounded" 
-                    width="100%" 
-                    height={48} 
-                    animation="wave"
-                    sx={{ bgcolor: (theme) => theme.palette.mode === "dark" ? "rgba(255, 255, 255, 0.03)" : "rgba(0, 0, 0, 0.03)" }}
-                />
-            ))}
-        </Box>
-    );
+    const handleChangePage = (event, newPage) => {
+        setPage(newPage);
+    };
+
+    const handleChangeRowsPerPage = (event) => {
+        setRowsPerPage(parseInt(event.target.value, 10));
+        setPage(0);
+    };
+
+    const displayRows = filteredRows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
 
     return (
         <Paper 
             elevation={1} 
             sx={{ 
                 width: "100%", 
-                height: 480, 
                 display: "flex", 
                 flexDirection: "column", 
                 borderRadius: 3, 
@@ -96,50 +97,98 @@ export function AppDataGrid({
         >
             <SearchToolbar
                 searchText={searchText}
-                onSearchChange={setSearchText}
+                onSearchChange={handleSearchChange}
                 placeholder={placeholder}
                 onExport={handleCSVExport}
             />
-            <Box sx={{ flexGrow: 1, width: "100%" }}>
-                <DataGrid
-                    rows={filteredRows}
-                    columns={columns}
-                    loading={loading}
-                    onRowClick={onRowClick}
-                    columnVisibilityModel={columnVisibilityModel}
-                    onColumnVisibilityModelChange={(newModel) => setColumnVisibilityModel(newModel)}
-                    initialState={{
-                        pagination: {
-                            paginationModel: { pageSize: 5, page: 0 }
-                        }
-                    }}
-                    pageSizeOptions={[5, 10, 20]}
-                    disableRowSelectionOnClick
-                    slots={{
-                        loadingOverlay: LoadingSkeleton
-                    }}
-                    sx={{
-                        border: "none",
-                        "& .MuiDataGrid-cell": {
-                            display: "flex",
-                            alignItems: "center",
-                            fontSize: "0.875rem",
-                        },
-                        "& .MuiDataGrid-row:hover": {
-                            backgroundColor: (theme) => theme.palette.mode === "dark" ? "rgba(99, 102, 241, 0.05)" : "rgba(79, 70, 229, 0.03)",
-                            cursor: onRowClick ? "pointer" : "default"
-                        },
-                        "& .MuiDataGrid-columnHeaders": {
-                            backgroundColor: (theme) => theme.palette.mode === "dark" ? "#1f2937" : "#f1f5f9"
-                        },
-                        "& .MuiDataGrid-footerContainer": {
-                            borderTop: "1px solid",
-                            borderColor: "divider"
-                        }
-                    }}
-                    {...props}
-                />
-            </Box>
+
+            <TableContainer sx={{ maxHeight: 420 }}>
+                <Table stickyHeader size="small">
+                    <TableHead>
+                        <TableRow>
+                            {columns.map((column) => (
+                                <TableCell
+                                    key={column.field}
+                                    align={column.align || "left"}
+                                    sx={{
+                                        fontWeight: 700,
+                                        fontSize: "0.85rem",
+                                        backgroundColor: (theme) => theme.palette.mode === "dark" ? "#1f2937" : "#f1f5f9",
+                                        color: "text.primary",
+                                        py: 1.5,
+                                        width: column.width || "auto"
+                                    }}
+                                >
+                                    {column.headerName}
+                                </TableCell>
+                            ))}
+                        </TableRow>
+                    </TableHead>
+                    <TableBody>
+                        {loading ? (
+                            Array.from({ length: rowsPerPage }).map((_, idx) => (
+                                <TableRow key={idx}>
+                                    {columns.map((col) => (
+                                        <TableCell key={col.field} sx={{ py: 1.5 }}>
+                                            <Skeleton variant="text" width="80%" height={24} />
+                                        </TableCell>
+                                    ))}
+                                </TableRow>
+                            ))
+                        ) : displayRows.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={columns.length} align="center" sx={{ py: 4, color: "text.secondary" }}>
+                                    No records found
+                                </TableCell>
+                            </TableRow>
+                        ) : (
+                            displayRows.map((row) => (
+                                <TableRow
+                                    hover
+                                    key={row.id || row.employeeId || Math.random()}
+                                    onClick={() => onRowClick && onRowClick({ row })}
+                                    sx={{
+                                        cursor: onRowClick ? "pointer" : "default",
+                                        "&:hover": {
+                                            backgroundColor: (theme) => theme.palette.mode === "dark" ? "rgba(99, 102, 241, 0.05) !important" : "rgba(79, 70, 229, 0.03) !important"
+                                        }
+                                    }}
+                                >
+                                    {columns.map((column) => {
+                                        const value = row[column.field];
+                                        const cellParams = {
+                                            row,
+                                            value,
+                                            id: row.id
+                                        };
+                                        const cellContent = column.renderCell ? column.renderCell(cellParams) : value;
+                                        return (
+                                            <TableCell key={column.field} align={column.align || "left"} sx={{ py: 1, fontSize: "0.875rem" }}>
+                                                {cellContent}
+                                            </TableCell>
+                                        );
+                                    })}
+                                </TableRow>
+                            ))
+                        )}
+                    </TableBody>
+                </Table>
+            </TableContainer>
+
+            <TablePagination
+                rowsPerPageOptions={[5, 10, 20]}
+                component="div"
+                count={filteredRows.length}
+                rowsPerPage={rowsPerPage}
+                page={page * rowsPerPage >= filteredRows.length ? 0 : page}
+                onPageChange={handleChangePage}
+                onRowsPerPageChange={handleChangeRowsPerPage}
+                sx={{
+                    borderTop: "1px solid",
+                    borderColor: "divider",
+                    bgcolor: "background.paper"
+                }}
+            />
         </Paper>
     );
 }

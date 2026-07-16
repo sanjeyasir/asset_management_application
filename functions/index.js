@@ -1,5 +1,6 @@
 const functions = require("firebase-functions");
 const {Firestore} = require("@google-cloud/firestore");
+const nodemailer = require("nodemailer");
 
 
 
@@ -10,6 +11,30 @@ const db = new Firestore({
     databaseId: "test-erp"
 
 });
+
+
+let transporter;
+const getTransporter = async () => {
+    if (transporter) return transporter;
+    try {
+        const testAccount = await nodemailer.createTestAccount();
+        transporter = nodemailer.createTransport({
+            host: "smtp.ethereal.email",
+            port: 587,
+            secure: false,
+            auth: {
+                user: testAccount.user,
+                pass: testAccount.pass
+            }
+        });
+        return transporter;
+    } catch (err) {
+        console.error("Failed to create Ethereal SMTP transporter, falling back to mock", err);
+        return nodemailer.createTransport({
+            jsonTransport: true
+        });
+    }
+};
 
 
 
@@ -88,4 +113,82 @@ async(req,res)=>{
     }
 
 
+});
+
+
+exports.sendSystemEmail = functions.https.onRequest(async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type");
+
+    if (req.method === "OPTIONS") {
+        return res.status(204).send("");
+    }
+
+    if (req.method !== "POST") {
+        return res.status(405).json({
+            success: false,
+            message: "Only POST allowed"
+        });
+    }
+
+    try {
+        const { to, message, emailId } = req.body;
+
+        if (!to || !message || !message.subject || !message.html) {
+            return res.status(400).json({
+                success: false,
+                message: "Missing recipient (to) or message (subject/html)"
+            });
+        }
+
+        const mailTransporter = await getTransporter();
+        const info = await mailTransporter.sendMail({
+            from: '"CloudERP Notifications" <noreply@clouderp-system.com>',
+            to,
+            subject: message.subject,
+            html: message.html
+        });
+
+        console.log("Email sent successfully. Message ID: ", info.messageId);
+        const previewUrl = nodemailer.getTestMessageUrl(info);
+        if (previewUrl) {
+            console.log("Ethereal Email Preview URL: ", previewUrl);
+        }
+
+        if (emailId) {
+            await db.collection("emails").doc(emailId).update({
+                status: "sent",
+                sentAt: new Date().toISOString(),
+                messageId: info.messageId,
+                previewUrl: previewUrl || null
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            messageId: info.messageId,
+            previewUrl: previewUrl || null
+        });
+
+    } catch (error) {
+        console.error("Error in sendSystemEmail Cloud Function:", error);
+        
+        if (req.body.emailId) {
+            try {
+                await db.collection("emails").doc(req.body.emailId).update({
+                    status: "failed",
+                    failedAt: new Date().toISOString(),
+                    error: error.message
+                });
+            } catch (updateErr) {
+                console.error("Failed to update email doc status to failed:", updateErr);
+            }
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
 });

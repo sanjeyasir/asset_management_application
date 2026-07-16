@@ -101,33 +101,31 @@ export const getTheme = (mode) => {
                     },
                 },
             },
-            MuiTextField: {
-                defaultProps: {
-                    variant: "outlined",
-                },
+            MuiOutlinedInput: {
                 styleOverrides: {
                     root: {
-                        "& .MuiOutlinedInput-root": {
-                            borderRadius: 10,
-                            backgroundColor: isDark ? "#1f2937" : "#f1f5f9",
-                            transition: "all 0.2s ease-in-out",
-                            "& fieldset": {
-                                borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
-                            },
-                            "&:hover fieldset": {
-                                borderColor: isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.2)",
-                            },
-                            "&.Mui-focused fieldset": {
-                                borderColor: isDark ? "#6366f1" : "#4f46e5",
-                            },
+                        borderRadius: 10,
+                        backgroundColor: isDark ? "#1f2937" : "#f1f5f9",
+                        transition: "all 0.2s ease-in-out",
+                        "& fieldset": {
+                            borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
+                        },
+                        "&:hover fieldset": {
+                            borderColor: isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.2)",
+                        },
+                        "&.Mui-focused fieldset": {
+                            borderColor: isDark ? "#6366f1" : "#4f46e5",
                         },
                     },
                 },
             },
-            MuiSelect: {
+            MuiPaper: {
                 styleOverrides: {
-                    select: {
-                        borderRadius: 10,
+                    root: {
+                        backgroundImage: "none",
+                    },
+                    rounded: {
+                        borderRadius: 16,
                     }
                 }
             },

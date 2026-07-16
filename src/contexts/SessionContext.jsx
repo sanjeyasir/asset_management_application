@@ -1,115 +1,150 @@
-import { createContext, useContext, useEffect, useRef, useCallback } from "react";
+import {
+    createContext,
+    useContext,
+    useEffect,
+    useRef,
+    useCallback,
+    useState,
+} from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "../config/firebase";
 import { useAuth } from "./AuthContext";
 import { useNotification } from "./NotificationContext";
+import sessionService from "../services/sessionService";
 
 const SessionContext = createContext();
 
-const THREE_HOURS_MS = 3 * 60 * 60 * 1000; // 3 hours in milliseconds
-const THROTTLE_DELAY_MS = 5000; // Throttle activity updates to once every 5 seconds
+// ─── Constants ────────────────────────────────────────────────────────────────
+/** How often the background checker polls Firestore for session validity (ms) */
+const VALIDATION_INTERVAL_MS = 60 * 1000; // every 60 seconds
+
+/** Minimum gap between activity-triggered Firestore refresh calls (ms) */
+const REFRESH_THROTTLE_MS = 30 * 1000; // at most once every 30 seconds
+
+// ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function SessionProvider({ children }) {
-    const { isAuthenticated } = useAuth();
+    const { currentUser } = useAuth();
+    const isAuthenticated = !!currentUser;
     const { showNotification } = useNotification();
-    const lastActivityRef = useRef(Date.now());
-    const checkIntervalRef = useRef(null);
 
-    // Save and retrieve activity from localStorage for multi-tab support
-    const getStoredLastActivity = useCallback(() => {
-        const stored = localStorage.getItem("cloud_erp_last_active");
-        return stored ? parseInt(stored, 10) : Date.now();
-    }, []);
+    /** Whether the initial session validation is still in progress */
+    const [sessionValidating, setSessionValidating] = useState(false);
 
-    const setStoredLastActivity = useCallback((timestamp) => {
-        localStorage.setItem("cloud_erp_last_active", timestamp.toString());
-    }, []);
+    const lastRefreshRef = useRef(0);
+    const validationIntervalRef = useRef(null);
 
-    const logoutExpiredSession = useCallback(async () => {
+    // ─── Logout (expired or force) ───────────────────────────────────────────
+
+    const handleSessionExpiry = useCallback(async (showExpiredMessage = true) => {
         try {
+            // Invalidate Firestore session record + clear local token
+            await sessionService.invalidateSession();
             await signOut(auth);
-            // Clear local and session storage
+        } catch (err) {
+            console.error("[SessionContext] signOut error during expiry:", err);
+        } finally {
+            // Set flag so the Login page can show the expiry notification
+            if (showExpiredMessage) {
+                localStorage.setItem("cloud_erp_session_expired", "true");
+            }
             localStorage.clear();
             sessionStorage.clear();
-            
-            // Set flag to show session expired snackbar upon redirecting/rendering login
-            localStorage.setItem("cloud_erp_session_expired", "true");
-            
-            // Force redirect to login page
             window.location.href = "/";
-        } catch (error) {
-            console.error("Error signing out expired session:", error);
         }
     }, []);
 
-    const resetSessionTimer = useCallback(() => {
-        if (!isAuthenticated) return;
-        
-        const now = Date.now();
-        // Throttle updates to local storage for performance
-        if (now - lastActivityRef.current > THROTTLE_DELAY_MS) {
-            lastActivityRef.current = now;
-            setStoredLastActivity(now);
-        }
-    }, [isAuthenticated, setStoredLastActivity]);
+    // ─── Periodic Firestore validation ───────────────────────────────────────
 
-    // Setup active listeners
+    const validateAndCheck = useCallback(async () => {
+        if (!isAuthenticated) return;
+
+        // Race condition guard: if user just logged in, session ID might not be in localStorage yet
+        let sessionId = sessionService.getSessionId();
+        if (!sessionId) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            sessionId = sessionService.getSessionId();
+            if (!sessionId) {
+                clearInterval(validationIntervalRef.current);
+                await handleSessionExpiry(true);
+                return;
+            }
+        }
+
+        const session = await sessionService.validateSession();
+        if (!session) {
+            // Session is no longer valid in Firestore (expired or invalidated remotely)
+            clearInterval(validationIntervalRef.current);
+            await handleSessionExpiry(true);
+        }
+    }, [isAuthenticated, handleSessionExpiry]);
+
+    // ─── Activity-triggered token refresh ────────────────────────────────────
+
+    /**
+     * Throttled refresh: extends the Firestore session's expiresAt on user activity.
+     * Components or hooks can call this to signal the user is still active.
+     */
+    const resetSessionTimer = useCallback(async () => {
+        if (!isAuthenticated) return;
+
+        const now = Date.now();
+        if (now - lastRefreshRef.current < REFRESH_THROTTLE_MS) return;
+
+        lastRefreshRef.current = now;
+        await sessionService.refreshSession();
+    }, [isAuthenticated]);
+
+    // ─── DOM activity listeners ───────────────────────────────────────────────
+
     useEffect(() => {
         if (!isAuthenticated) {
-            if (checkIntervalRef.current) {
-                clearInterval(checkIntervalRef.current);
-            }
+            clearInterval(validationIntervalRef.current);
             return;
         }
 
-        // Initialize last activity timestamp
-        lastActivityRef.current = Date.now();
-        setStoredLastActivity(lastActivityRef.current);
+        const activityEvents = ["mousemove", "keydown", "click", "scroll", "touchstart"];
 
-        const events = ["mousemove", "keydown", "click", "scroll"];
-        
         const activityHandler = () => {
+            // Fire-and-forget — throttled inside resetSessionTimer
             resetSessionTimer();
         };
 
-        events.forEach((event) => {
-            window.addEventListener(event, activityHandler, { passive: true });
-        });
+        activityEvents.forEach((event) =>
+            window.addEventListener(event, activityHandler, { passive: true })
+        );
 
-        // Background checker every 10 seconds
-        checkIntervalRef.current = setInterval(() => {
-            const lastActive = getStoredLastActivity();
-            const now = Date.now();
-            
-            if (now - lastActive >= THREE_HOURS_MS) {
-                clearInterval(checkIntervalRef.current);
-                logoutExpiredSession();
-            }
-        }, 10000);
+        // Kick off periodic Firestore validation
+        validationIntervalRef.current = setInterval(validateAndCheck, VALIDATION_INTERVAL_MS);
+
+        // Run one immediate check when auth state settles
+        validateAndCheck();
 
         return () => {
-            events.forEach((event) => {
-                window.removeEventListener(event, activityHandler);
-            });
-            if (checkIntervalRef.current) {
-                clearInterval(checkIntervalRef.current);
-            }
+            activityEvents.forEach((event) =>
+                window.removeEventListener(event, activityHandler)
+            );
+            clearInterval(validationIntervalRef.current);
         };
-    }, [isAuthenticated, resetSessionTimer, getStoredLastActivity, setStoredLastActivity, logoutExpiredSession]);
+    }, [isAuthenticated, resetSessionTimer, validateAndCheck]);
 
-    // Handle showing expired notification if the flag exists on startup/login render
+    // ─── Session-expired notification on Login render ─────────────────────────
+
     useEffect(() => {
         if (localStorage.getItem("cloud_erp_session_expired") === "true") {
             localStorage.removeItem("cloud_erp_session_expired");
-            // Small delay to ensure the UI is fully painted
             setTimeout(() => {
-                showNotification("Your session has expired. Please login again.", "warning", 6000);
+                showNotification(
+                    "Your session has expired. Please login again.",
+                    "warning",
+                    6000
+                );
             }, 500);
         }
     }, [showNotification]);
 
     return (
-        <SessionContext.Provider value={{ resetSessionTimer }}>
+        <SessionContext.Provider value={{ resetSessionTimer, sessionValidating }}>
             {children}
         </SessionContext.Provider>
     );

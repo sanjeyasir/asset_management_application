@@ -27,13 +27,15 @@ export function SearchToolbar({
                 placeholder={placeholder}
                 value={searchText}
                 onChange={(e) => onSearchChange(e.target.value)}
-                InputProps={{
-                    startAdornment: (
-                        <InputAdornment position="start">
-                            <Search fontSize="small" sx={{ color: "text.secondary" }} />
-                        </InputAdornment>
-                    ),
-                    sx: { borderRadius: 2, maxWidth: { xs: "100%", md: 320 } }
+                slotProps={{
+                    input: {
+                        startAdornment: (
+                            <InputAdornment position="start">
+                                <Search fontSize="small" sx={{ color: "text.secondary" }} />
+                            </InputAdornment>
+                        ),
+                        sx: { borderRadius: 2, maxWidth: { xs: "100%", md: 320 } }
+                    }
                 }}
             />
             <Box display="flex" gap={1.5} flexWrap="wrap">
