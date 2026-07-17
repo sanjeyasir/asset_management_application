@@ -3,10 +3,10 @@ import { useForm } from "react-hook-form";
 import { yupResolver } from "@hookform/resolvers/yup";
 import * as yup from "yup";
 import {
-    Box, Grid, Typography, IconButton, Divider, Tooltip, Alert
+    Box, Grid, Typography, IconButton, Divider, Tooltip, Alert, Tabs, Tab, Dialog, DialogTitle, DialogContent, DialogActions, TextField
 } from "@mui/material";
 import {
-    Add, Edit, Delete, Save, Close, People
+    Add, Edit, Delete, Save, Close, People, VpnKey
 } from "@mui/icons-material";
 import Avatar from "@mui/material/Avatar";
 import Chip from "@mui/material/Chip";
@@ -16,8 +16,11 @@ import AppButton from "../../components/common/AppButton";
 import AppTextField from "../../components/common/AppTextField";
 import AppSelect from "../../components/common/AppSelect";
 import AppDatePicker from "../../components/common/AppDatePicker";
-import DeleteDialog from "../../components/common/AppDialog";
+import DeleteDialog from "../../components/dialogs/DeleteDialog";
 import MasterPage from "../../components/layout/MasterPage";
+import authService from "../../services/authService";
+import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { db } from "../../config/firebase";
 
 import employeeService from "../../services/employeeService";
 import departmentService from "../../services/departmentService";
@@ -33,6 +36,8 @@ const employeeSchema = yup.object().shape({
     email: yup.string().email("Invalid email address").required("Email address is required"),
     mobileNumber: yup.string().required("Mobile number is required"),
     dateOfJoin: yup.string().required("Date of join is required"),
+    role: yup.string().required("Role is required"),
+    password: yup.string().notRequired(),
     status: yup.string().required("Employment status is required"),
 });
 
@@ -44,6 +49,8 @@ const EMPTY_FORM = {
     email: "",
     mobileNumber: "",
     dateOfJoin: "",
+    role: "Employee",
+    password: "",
     status: "Active"
 };
 
@@ -64,6 +71,14 @@ function Employees() {
     const [formError, setFormError] = useState("");
     const [departments, setDepartments] = useState([]);
     const [designations, setDesignations] = useState([]);
+
+    const [tabIndex, setTabIndex] = useState(0);
+    const [resetRequests, setResetRequests] = useState([]);
+    const [loadingRequests, setLoadingRequests] = useState(false);
+    const [approvalTarget, setApprovalTarget] = useState(null);
+    const [tempPassword, setTempPassword] = useState("");
+    const [approving, setApproving] = useState(false);
+    const [approvalError, setApprovalError] = useState("");
 
     const { control, handleSubmit, reset } = useForm({
         resolver: yupResolver(employeeSchema),
@@ -88,7 +103,24 @@ function Employees() {
         }
     }, [showNotification]);
 
-    useEffect(() => { load(); }, [load]);
+    const loadRequests = useCallback(async () => {
+        setLoadingRequests(true);
+        try {
+            const reqQ = query(collection(db, "passwordResetRequests"), orderBy("requestedAt", "desc"));
+            const snap = await getDocs(reqQ);
+            const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setResetRequests(data);
+        } catch (err) {
+            console.error("Failed to load password reset requests:", err);
+        } finally {
+            setLoadingRequests(false);
+        }
+    }, []);
+
+    useEffect(() => { 
+        load(); 
+        loadRequests();
+    }, [load, loadRequests]);
 
     const handleRowClick = (params) => {
         const r = params.row;
@@ -98,7 +130,8 @@ function Employees() {
             firstName: r.firstName || "", lastName: r.lastName || "",
             department: r.department || "", designation: r.designation || "",
             email: r.email || "", mobileNumber: r.mobileNumber || "",
-            dateOfJoin: r.dateOfJoin || "", status: r.status || "Active"
+            dateOfJoin: r.dateOfJoin || "", role: r.role || "Employee",
+            password: "", status: r.status || "Active"
         });
     };
 
@@ -112,11 +145,19 @@ function Employees() {
         setFormError("");
         try {
             if (editId) {
-                await employeeService.updateEmployee(editId, data);
+                // Remove password from edit payload
+                const { password, ...updateData } = data;
+                await employeeService.updateEmployee(editId, updateData);
                 showNotification("Employee updated successfully.", "success");
             } else {
+                if (!data.password) {
+                    throw new Error("Initial password is required for new registration.");
+                }
+                if (data.password.length < 6) {
+                    throw new Error("Initial password must be at least 6 characters.");
+                }
                 await employeeService.createEmployee(data);
-                showNotification("Employee created and welcome email queued.", "success");
+                showNotification("Employee and auth account created successfully.", "success");
             }
             handleNew();
             load();
@@ -141,6 +182,72 @@ function Employees() {
             setDeleting(false);
         }
     };
+
+    const handleApproveConfirm = async (e) => {
+        e.preventDefault();
+        if (!tempPassword) {
+            setApprovalError("Temporary password is required.");
+            return;
+        }
+        if (tempPassword.length < 6) {
+            setApprovalError("Password must be at least 6 characters.");
+            return;
+        }
+        setApproving(true);
+        setApprovalError("");
+        try {
+            await authService.approveResetRequest(approvalTarget.id, approvalTarget.email, tempPassword);
+            showNotification(`Password reset request for "${approvalTarget.email}" approved.`, "success");
+            setApprovalTarget(null);
+            setTempPassword("");
+            loadRequests();
+            load();
+        } catch (err) {
+            setApprovalError(err.message || "Failed to approve password reset.");
+        } finally {
+            setApproving(false);
+        }
+    };
+
+    const requestColumns = [
+        { field: "email", headerName: "Employee Email", flex: 1.5, renderCell: (p) => (
+            <Box sx={{ py: 1 }}>
+                <Typography variant="body2" fontWeight="700">{p.row.fullName || "—"}</Typography>
+                <Typography variant="caption" color="text.secondary">{p.row.email}</Typography>
+            </Box>
+        )},
+        { field: "requestedAt", headerName: "Requested Date", flex: 1, renderCell: (p) => (
+            <Typography variant="caption" color="text.secondary" fontWeight="500">
+                {p.value ? new Date(p.value).toLocaleString() : "—"}
+            </Typography>
+        )},
+        { field: "status", headerName: "Status", width: 120, renderCell: (p) => (
+            <Chip 
+                label={p.value} 
+                size="small" 
+                color={p.value === "Approved" ? "success" : "warning"} 
+                sx={{ fontWeight: 600 }} 
+            />
+        )},
+        { field: "actions", headerName: "", width: 90, sortable: false, renderCell: (p) => (
+            p.row.status === "Pending" ? (
+                <Tooltip title="Approve & Reset Password">
+                    <IconButton 
+                        size="small" 
+                        color="primary" 
+                        onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setApprovalError("");
+                            setTempPassword("");
+                            setApprovalTarget(p.row); 
+                        }}
+                    >
+                        <VpnKey fontSize="small" />
+                    </IconButton>
+                </Tooltip>
+            ) : null
+        )},
+    ];
 
     const statusColors = { Active: "success", Terminated: "error", "On Leave": "warning" };
 
@@ -167,6 +274,9 @@ function Employees() {
         )},
         { field: "designation", headerName: "Designation", flex: 1, renderCell: (p) => (
             <Typography variant="caption" color="text.secondary" fontWeight="500">{p.value || "—"}</Typography>
+        )},
+        { field: "role", headerName: "Role", width: 110, renderCell: (p) => (
+            <Chip label={p.value || "Employee"} size="small" color="primary" variant="outlined" sx={{ fontWeight: 600 }} />
         )},
         { field: "status", headerName: "Status", width: 100, renderCell: (p) => (
             <Chip label={p.value} size="small" color={statusColors[p.value] || "default"} sx={{ fontWeight: 600 }} />
@@ -204,6 +314,29 @@ function Employees() {
                 <AppTextField name="email" control={control} label="Email Address *" type="email" size="small" />
                 <AppTextField name="mobileNumber" control={control} label="Mobile Number *" size="small" />
                 <AppDatePicker name="dateOfJoin" control={control} label="Date of Join *" size="small" />
+                
+                <AppSelect 
+                    name="role" 
+                    control={control} 
+                    label="Role *" 
+                    options={[
+                        { value: "Admin", label: "Admin" },
+                        { value: "Manager", label: "Manager" },
+                        { value: "Employee", label: "Employee" }
+                    ]} 
+                    size="small" 
+                />
+
+                {!editId && (
+                    <AppTextField 
+                        name="password" 
+                        control={control} 
+                        label="Initial Password *" 
+                        type="password" 
+                        size="small" 
+                    />
+                )}
+
                 <AppSelect name="status" control={control} label="Employment Status *" options={STATUS_OPTIONS} size="small" />
             </Box>
 
@@ -217,6 +350,41 @@ function Employees() {
         </Box>
     );
 
+    const gridPanelContent = (
+        <Box display="flex" flexDirection="column" gap={2} height="100%">
+            <Tabs 
+                value={tabIndex} 
+                onChange={(e, val) => setTabIndex(val)}
+                sx={{ borderBottom: 1, borderColor: "divider" }}
+            >
+                <Tab label="Employee Directory" sx={{ fontWeight: 600 }} />
+                <Tab 
+                    label={`Password Reset Requests (${resetRequests.filter(r => r.status === "Pending").length})`} 
+                    sx={{ fontWeight: 600 }} 
+                />
+            </Tabs>
+            
+            {tabIndex === 0 ? (
+                <AppDataGrid 
+                    rows={rows} 
+                    columns={columns} 
+                    loading={loading} 
+                    onRowClick={handleRowClick} 
+                    exportFileName="employees.csv" 
+                    placeholder="Search employees..." 
+                />
+            ) : (
+                <AppDataGrid 
+                    rows={resetRequests} 
+                    columns={requestColumns} 
+                    loading={loadingRequests} 
+                    exportFileName="reset_requests.csv" 
+                    placeholder="Search requests..." 
+                />
+            )}
+        </Box>
+    );
+
     return (
         <>
             <MasterPage
@@ -224,12 +392,57 @@ function Employees() {
                 subtitle="Manage employee records with assignments and profiles"
                 breadcrumbs={[{ label: "Master Registry" }, { label: "Employees" }]}
                 action={<AppButton startIcon={<Add />} onClick={handleNew}>New Employee</AppButton>}
-                gridPanel={<AppDataGrid rows={rows} columns={columns} loading={loading} onRowClick={handleRowClick} exportFileName="employees.csv" placeholder="Search employees..." />}
+                gridPanel={gridPanelContent}
                 formPanel={formPanel}
             />
             <DeleteDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm}
                 loading={deleting}
                 message={`Delete employee "${deleteTarget?.firstName} ${deleteTarget?.lastName}"? All associated records will be affected.`} />
+
+            <Dialog 
+                open={!!approvalTarget} 
+                onClose={() => !approving && setApprovalTarget(null)}
+                fullWidth
+                maxWidth="xs"
+                PaperProps={{ sx: { borderRadius: 3 } }}
+            >
+                <Box component="form" onSubmit={handleApproveConfirm}>
+                    <DialogTitle sx={{ fontWeight: 700, pb: 1 }}>Approve Password Reset</DialogTitle>
+                    <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
+                        <Typography variant="body2" color="text.secondary">
+                            Enter a temporary password for <strong>{approvalTarget?.fullName}</strong> ({approvalTarget?.email}). 
+                            The user will be required to change this password when they sign in.
+                        </Typography>
+                        {approvalError && <Alert severity="error" sx={{ borderRadius: 2 }}>{approvalError}</Alert>}
+                        <TextField
+                            fullWidth
+                            size="small"
+                            label="Temporary Password"
+                            type="text"
+                            value={tempPassword}
+                            onChange={(e) => setTempPassword(e.target.value)}
+                            disabled={approving}
+                            required
+                        />
+                    </DialogContent>
+                    <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
+                        <AppButton 
+                            variant="outlined" 
+                            color="inherit" 
+                            onClick={() => setApprovalTarget(null)}
+                            disabled={approving}
+                        >
+                            Cancel
+                        </AppButton>
+                        <AppButton 
+                            type="submit" 
+                            loading={approving}
+                        >
+                            Confirm Approval
+                        </AppButton>
+                    </DialogActions>
+                </Box>
+            </Dialog>
         </>
     );
 }

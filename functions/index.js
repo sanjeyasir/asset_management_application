@@ -1,6 +1,11 @@
 const functions = require("firebase-functions");
 const {Firestore} = require("@google-cloud/firestore");
 const nodemailer = require("nodemailer");
+const admin = require("firebase-admin");
+
+if (admin.apps.length === 0) {
+    admin.initializeApp();
+}
 
 
 
@@ -186,6 +191,53 @@ exports.sendSystemEmail = functions.https.onRequest(async (req, res) => {
             }
         }
 
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
+
+exports.resetUserPassword = functions.https.onRequest(async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type");
+
+    if (req.method === "OPTIONS") {
+        return res.status(204).send("");
+    }
+
+    if (req.method !== "POST") {
+        return res.status(405).json({
+            success: false,
+            message: "Only POST allowed"
+        });
+    }
+
+    try {
+        const { email, tempPassword } = req.body;
+        if (!email || !tempPassword) {
+            return res.status(400).json({
+                success: false,
+                message: "Missing email or temporary password"
+            });
+        }
+
+        // Get user by email from Firebase Auth
+        const userRecord = await admin.auth().getUserByEmail(email.toLowerCase());
+        
+        // Update user password using Admin SDK
+        await admin.auth().updateUser(userRecord.uid, {
+            password: tempPassword
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Password reset successful"
+        });
+    } catch (error) {
+        console.error("Error in resetUserPassword Cloud Function:", error);
         return res.status(500).json({
             success: false,
             message: error.message

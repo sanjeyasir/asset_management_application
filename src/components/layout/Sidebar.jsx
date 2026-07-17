@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Collapse, Box, IconButton, Divider } from "@mui/material";
 import { Link, useLocation } from "react-router-dom";
+import { useAuth } from "../../contexts/AuthContext";
 import { 
     Dashboard, People, Business, Settings, Assessment, ChevronLeft, ChevronRight, 
     ExpandLess, ExpandMore, Category, Room, Devices, BusinessCenter, Layers 
@@ -16,6 +17,7 @@ export function Sidebar({
     handleSidebarCollapse 
 }) {
     const location = useLocation();
+    const { currentUser } = useAuth();
     const [mastersOpen, setMastersOpen] = useState(true);
 
     const toggleMasters = (e) => {
@@ -25,14 +27,16 @@ export function Sidebar({
 
     const isSelected = (path) => location.pathname === path;
 
+    const userRole = currentUser?.role || "Employee";
+
     const masterItems = [
-        { title: "Asset Categories", path: "/asset-categories", icon: <Category fontSize="small" /> },
-        { title: "Locations", path: "/locations", icon: <Room fontSize="small" /> },
-        { title: "Departments", path: "/departments", icon: <Business fontSize="small" /> },
-        { title: "Designations", path: "/designations", icon: <BusinessCenter fontSize="small" /> },
-        { title: "Employees", path: "/employees", icon: <People fontSize="small" /> },
-        { title: "Assets", path: "/assets", icon: <Devices fontSize="small" /> },
-    ];
+        { title: "Asset Categories", path: "/asset-categories", icon: <Category fontSize="small" />, roles: ["Admin", "Manager"] },
+        { title: "Locations", path: "/locations", icon: <Room fontSize="small" />, roles: ["Admin", "Manager"] },
+        { title: "Departments", path: "/departments", icon: <Business fontSize="small" />, roles: ["Admin"] },
+        { title: "Designations", path: "/designations", icon: <BusinessCenter fontSize="small" />, roles: ["Admin"] },
+        { title: "Employees", path: "/employees", icon: <People fontSize="small" />, roles: ["Admin"] },
+        { title: "Assets", path: "/assets", icon: <Devices fontSize="small" />, roles: ["Admin", "Manager", "Employee"] },
+    ].filter(item => item.roles.includes(userRole));
 
     const drawerContent = (
         <Box display="flex" flexDirection="column" height="100%">

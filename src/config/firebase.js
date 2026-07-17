@@ -3,7 +3,7 @@ import { getAuth } from "firebase/auth";
 import { initializeFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
-const firebaseConfig = {
+export const firebaseConfig = {
     apiKey: "AIzaSyBikxOMJLoF-c3zMMTwaemhze68vY3iGuU",
     authDomain: "clouderp-system.firebaseapp.com",
     projectId: "clouderp-system",

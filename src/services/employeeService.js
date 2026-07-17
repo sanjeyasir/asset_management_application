@@ -1,6 +1,8 @@
 import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc, query, where } from "firebase/firestore";
-import { db } from "../config/firebase";
+import { db, firebaseConfig } from "../config/firebase";
 import emailService from "./emailService";
+import { initializeApp } from "firebase/app";
+import { getAuth, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 
 const COLLECTION_NAME = "employees";
 
@@ -51,8 +53,9 @@ export const employeeService = {
 
     createEmployee: async (data) => {
         try {
+            const emailLower = data.email.toLowerCase();
             // Check for duplicate email
-            const q = query(collection(db, COLLECTION_NAME), where("email", "==", data.email));
+            const q = query(collection(db, COLLECTION_NAME), where("email", "==", emailLower));
             const querySnap = await getDocs(q);
             if (!querySnap.empty) {
                 throw new Error(`Employee with email "${data.email}" already exists.`);
@@ -62,10 +65,29 @@ export const employeeService = {
             const employeeId = await generateNextEmployeeId();
             const fullName = `${data.firstName || ""} ${data.lastName || ""}`.trim();
             
+            // Create Firebase Auth user client-side using a secondary app instance
+            if (data.password) {
+                const secondaryApp = initializeApp(firebaseConfig, `secondary_${Date.now()}`);
+                const secondaryAuth = getAuth(secondaryApp);
+                try {
+                    await createUserWithEmailAndPassword(secondaryAuth, emailLower, data.password);
+                    await signOut(secondaryAuth);
+                } catch (authError) {
+                    console.error("Firebase Auth user creation failed:", authError);
+                    throw new Error(`Auth account creation failed: ${authError.message}`);
+                }
+            }
+
+            // Omit password from document written to Firestore
+            const { password, ...firestoreData } = data;
+
             const docData = {
-                ...data,
+                ...firestoreData,
+                email: emailLower,
                 employeeId,
                 fullName,
+                role: data.role || "Employee",
+                isFirstLogin: data.password ? true : false,
                 profilePicture: "",
                 createdAt: new Date().toISOString()
             };
@@ -92,8 +114,9 @@ export const employeeService = {
             const oldValue = docSnap.data();
 
             // Check email duplication if changed
-            if (data.email && data.email !== oldValue.email) {
-                const q = query(collection(db, COLLECTION_NAME), where("email", "==", data.email));
+            if (data.email && data.email.toLowerCase() !== oldValue.email.toLowerCase()) {
+                const emailLower = data.email.toLowerCase();
+                const q = query(collection(db, COLLECTION_NAME), where("email", "==", emailLower));
                 const querySnap = await getDocs(q);
                 if (!querySnap.empty) {
                     throw new Error(`Employee with email "${data.email}" already exists.`);
@@ -103,6 +126,7 @@ export const employeeService = {
             const fullName = `${data.firstName || oldValue.firstName} ${data.lastName || oldValue.lastName}`.trim();
             const updateData = {
                 ...data,
+                ...(data.email ? { email: data.email.toLowerCase() } : {}),
                 fullName,
                 updatedAt: new Date().toISOString()
             };

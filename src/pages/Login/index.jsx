@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -9,7 +9,11 @@ import {
     InputAdornment,
     Alert,
     Paper,
-    Divider
+    Divider,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions
 } from "@mui/material";
 
 import {
@@ -26,6 +30,8 @@ import * as yup from "yup";
 
 import AppButton from "../../components/common/AppButton";
 import authService from "../../services/authService";
+import { useAuth } from "../../contexts/AuthContext";
+import { useNotification } from "../../contexts/NotificationContext";
 
 
 const schema = yup.object({
@@ -42,10 +48,47 @@ const schema = yup.object({
 function Login() {
 
     const navigate = useNavigate();
+    const { currentUser } = useAuth();
+    const { showNotification } = useNotification();
 
     const [showPassword, setShowPassword] = useState(false);
     const [errorMsg, setErrorMsg] = useState("");
     const [loading, setLoading] = useState(false);
+
+    const [forgotOpen, setForgotOpen] = useState(false);
+    const [forgotEmail, setForgotEmail] = useState("");
+    const [forgotLoading, setForgotLoading] = useState(false);
+    const [forgotError, setForgotError] = useState("");
+
+    const handleForgotSubmit = async (e) => {
+        e.preventDefault();
+        if (!forgotEmail) {
+            setForgotError("Email address is required.");
+            return;
+        }
+        setForgotLoading(true);
+        setForgotError("");
+        try {
+            await authService.submitResetRequest(forgotEmail);
+            showNotification("Password reset request submitted to Administrator.", "success");
+            setForgotOpen(false);
+            setForgotEmail("");
+        } catch (err) {
+            setForgotError(err.message || "Failed to submit request.");
+        } finally {
+            setForgotLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (currentUser) {
+            if (currentUser.isFirstLogin) {
+                navigate("/reset-password");
+            } else {
+                navigate("/dashboard");
+            }
+        }
+    }, [currentUser, navigate]);
 
 
     const {
@@ -76,8 +119,6 @@ function Login() {
                 data.email,
                 data.password
             );
-
-            navigate("/dashboard");
 
 
         } catch (err) {
@@ -178,6 +219,8 @@ function Login() {
                         variant="body2"
 
                         mt={0.5}
+
+                        style={{ padding: '10px' }}
 
                     >
 
@@ -369,6 +412,25 @@ function Login() {
 
                     </AppButton>
 
+                    <Box display="flex" justifyContent="flex-end" sx={{ mt: 1.5 }}>
+                        <IconButton
+                            onClick={() => {
+                                setForgotError("");
+                                setForgotEmail("");
+                                setForgotOpen(true);
+                            }}
+                            sx={{
+                                fontSize: "0.85rem",
+                                color: "primary.main",
+                                borderRadius: 1.5,
+                                p: 0.5,
+                                fontWeight: 600,
+                                "&:hover": { bgcolor: "rgba(99, 102, 241, 0.08)" }
+                            }}
+                        >
+                            Forgot Password?
+                        </IconButton>
+                    </Box>
 
                 </Box>
 
@@ -398,6 +460,49 @@ function Login() {
 
             </Paper>
 
+            <Dialog
+                open={forgotOpen}
+                onClose={() => !forgotLoading && setForgotOpen(false)}
+                fullWidth
+                maxWidth="xs"
+                PaperProps={{ sx: { borderRadius: 3 } }}
+            >
+                <Box component="form" onSubmit={handleForgotSubmit}>
+                    <DialogTitle sx={{ fontWeight: 700, pb: 1 }}>Request Password Reset</DialogTitle>
+                    <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
+                        <Typography variant="body2" color="text.secondary">
+                            Enter your registered email address. Your administrator will be notified to review and reset your password.
+                        </Typography>
+                        {forgotError && <Alert severity="error" sx={{ borderRadius: 2 }}>{forgotError}</Alert>}
+                        <TextField
+                            fullWidth
+                            size="small"
+                            label="Email Address"
+                            type="email"
+                            value={forgotEmail}
+                            onChange={(e) => setForgotEmail(e.target.value)}
+                            disabled={forgotLoading}
+                            required
+                        />
+                    </DialogContent>
+                    <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
+                        <AppButton
+                            variant="outlined"
+                            color="inherit"
+                            onClick={() => setForgotOpen(false)}
+                            disabled={forgotLoading}
+                        >
+                            Cancel
+                        </AppButton>
+                        <AppButton
+                            type="submit"
+                            loading={forgotLoading}
+                        >
+                            Submit Request
+                        </AppButton>
+                    </DialogActions>
+                </Box>
+            </Dialog>
 
         </Box>
 

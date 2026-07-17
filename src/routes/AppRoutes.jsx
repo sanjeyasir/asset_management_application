@@ -15,7 +15,8 @@ import Locations from "../pages/Locations/index";
 import AssetCategories from "../pages/AssetCategories/index";
 import Assets from "../pages/Assets/index";
 
-import ProtectedRoute from "./ProtectedRoute";
+import ProtectedRoute, { ResetPasswordRoute, PageAccessGuard } from "./ProtectedRoute";
+import ResetPassword from "../pages/ResetPassword/index";
 
 
 
@@ -31,6 +32,15 @@ function AppRoutes() {
             <Route
                 path="/"
                 element={<Login />}
+            />
+
+            <Route
+                path="/reset-password"
+                element={
+                    <ResetPasswordRoute>
+                        <ResetPassword />
+                    </ResetPasswordRoute>
+                }
             />
 
 
@@ -66,7 +76,11 @@ function AppRoutes() {
 
                     path="/employees"
 
-                    element={<Employees />}
+                    element={
+                        <PageAccessGuard allowedRoles={["Admin"]}>
+                            <Employees />
+                        </PageAccessGuard>
+                    }
 
                 />
 
@@ -76,7 +90,11 @@ function AppRoutes() {
 
                     path="/departments"
 
-                    element={<Departments />}
+                    element={
+                        <PageAccessGuard allowedRoles={["Admin"]}>
+                            <Departments />
+                        </PageAccessGuard>
+                    }
 
                 />
 
@@ -86,7 +104,11 @@ function AppRoutes() {
 
                     path="/designations"
 
-                    element={<Designations />}
+                    element={
+                        <PageAccessGuard allowedRoles={["Admin"]}>
+                            <Designations />
+                        </PageAccessGuard>
+                    }
 
                 />
 
@@ -96,7 +118,11 @@ function AppRoutes() {
 
                     path="/locations"
 
-                    element={<Locations />}
+                    element={
+                        <PageAccessGuard allowedRoles={["Admin", "Manager"]}>
+                            <Locations />
+                        </PageAccessGuard>
+                    }
 
                 />
 
@@ -106,7 +132,11 @@ function AppRoutes() {
 
                     path="/asset-categories"
 
-                    element={<AssetCategories />}
+                    element={
+                        <PageAccessGuard allowedRoles={["Admin", "Manager"]}>
+                            <AssetCategories />
+                        </PageAccessGuard>
+                    }
 
                 />
 
@@ -116,7 +146,11 @@ function AppRoutes() {
 
                     path="/assets"
 
-                    element={<Assets />}
+                    element={
+                        <PageAccessGuard allowedRoles={["Admin", "Manager", "Employee"]}>
+                            <Assets />
+                        </PageAccessGuard>
+                    }
 
                 />
 
