@@ -48,7 +48,7 @@ const schema = yup.object({
 function Login() {
 
     const navigate = useNavigate();
-    const { currentUser } = useAuth();
+    const { currentUser, login } = useAuth();
     const { showNotification } = useNotification();
 
     const [showPassword, setShowPassword] = useState(false);
@@ -115,7 +115,7 @@ function Login() {
             setLoading(true);
             setErrorMsg("");
 
-            await authService.login(
+            await login(
                 data.email,
                 data.password
             );
@@ -200,32 +200,19 @@ function Login() {
 
 
                     <Typography
-
                         variant="h5"
-
                         fontWeight={800}
-
                     >
-
-                        Asset Management Portal
-
+                        Admin Dashboard Portal
                     </Typography>
 
-
                     <Typography
-
                         color="text.secondary"
-
                         variant="body2"
-
                         mt={0.5}
-
                         style={{ padding: '10px' }}
-
                     >
-
-                        Sign in to your workspace
-
+                        Sign in to your Admin account
                     </Typography>
 
 

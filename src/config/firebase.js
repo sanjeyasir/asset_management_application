@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { initializeFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage";
+import { getAuth, connectAuthEmulator } from "firebase/auth";
+import { initializeFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import { getStorage, connectStorageEmulator } from "firebase/storage";
 
 export const firebaseConfig = {
     apiKey: "AIzaSyBikxOMJLoF-c3zMMTwaemhze68vY3iGuU",
@@ -20,5 +20,21 @@ export const auth = getAuth(app);
 export const db = initializeFirestore(app, {}, "test-erp");
 
 export const storage = getStorage(app);
+
+const isLocalhost = typeof window !== 'undefined' && (
+  window.location.hostname === 'localhost' || 
+  window.location.hostname === '127.0.0.1' || 
+  window.location.hostname.startsWith('192.168.') || 
+  window.location.hostname.startsWith('10.') || 
+  window.location.hostname.endsWith('.local')
+);
+
+if (isLocalhost) {
+  const host = window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
+  console.log(`Connecting to local Firebase Emulators at ${host}...`);
+  connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+  connectFirestoreEmulator(db, host, 8080);
+  connectStorageEmulator(storage, host, 9199);
+}
 
 export default app;

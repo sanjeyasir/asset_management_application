@@ -22,24 +22,24 @@ let transporter;
 const getTransporter = async () => {
     if (transporter) return transporter;
     try {
-        const testAccount = await nodemailer.createTestAccount();
         transporter = nodemailer.createTransport({
-            host: "smtp.ethereal.email",
-            port: 587,
-            secure: false,
+            host: "smtp.resend.com",
+            port: 465,
+            secure: true,
             auth: {
-                user: testAccount.user,
-                pass: testAccount.pass
+                user: "resend",
+                pass: process.env.RESEND_API_KEY
             }
         });
         return transporter;
     } catch (err) {
-        console.error("Failed to create Ethereal SMTP transporter, falling back to mock", err);
+        console.error("Failed to create Resend SMTP transporter, falling back to mock", err);
         return nodemailer.createTransport({
             jsonTransport: true
         });
     }
 };
+
 
 
 
@@ -149,24 +149,19 @@ exports.sendSystemEmail = functions.https.onRequest(async (req, res) => {
 
         const mailTransporter = await getTransporter();
         const info = await mailTransporter.sendMail({
-            from: '"CloudERP Notifications" <noreply@clouderp-system.com>',
+            from: '"CloudERP Notifications" <onboarding@resend.dev>',
             to,
             subject: message.subject,
             html: message.html
         });
 
         console.log("Email sent successfully. Message ID: ", info.messageId);
-        const previewUrl = nodemailer.getTestMessageUrl(info);
-        if (previewUrl) {
-            console.log("Ethereal Email Preview URL: ", previewUrl);
-        }
 
         if (emailId) {
             await db.collection("emails").doc(emailId).update({
                 status: "sent",
                 sentAt: new Date().toISOString(),
-                messageId: info.messageId,
-                previewUrl: previewUrl || null
+                messageId: info.messageId
             });
         }
 
@@ -244,3 +239,132 @@ exports.resetUserPassword = functions.https.onRequest(async (req, res) => {
         });
     }
 });
+
+
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+
+exports.sendScheduledNews = onSchedule(
+    {
+        schedule: "0 6,12,18 * * *",
+        timeZone: "Asia/Kolkata"
+    },
+    async (event) => {
+        const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+        let locationName = "Chennai, India";
+
+        try {
+            // Get locations from firestore to customize news
+            const locSnap = await db.collection("locations").get();
+            if (!locSnap.empty) {
+                const activeLocs = [];
+                locSnap.forEach(d => {
+                    const lData = d.data();
+                    if (lData.active && lData.name) {
+                        activeLocs.push(lData.name);
+                    }
+                });
+                // Filter out generic location names
+                const realLocs = activeLocs.filter(name => !["Headquarters", "Branch Office", "Remote"].includes(name));
+                if (realLocs.length > 0) {
+                    locationName = realLocs[0];
+                } else if (activeLocs.length > 0) {
+                    locationName = activeLocs[0];
+                }
+            }
+        } catch (err) {
+            console.error("Failed to query locations collection, using default Chennai, India:", err);
+        }
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+        const prompt = `Get the current weather and top 10 news for ${locationName}. 
+Format the output in a highly creative, responsive HTML email newsletter format suitable for sending to a user.
+Include a greeting, weather dashboard section with current temperature, conditions, and high/low forecasts, a news section with the top 10 headlines with brief summaries, and other relevant local information or updates.
+Use a professional, premium visual design (e.g., beautiful typography, consistent spacing, card-based layout, subtle shadows, and an elegant color scheme).
+Ensure all styles are inlined or in a style tag.
+Output ONLY the raw HTML (enclosed in <html> and </html>) with NO markdown formatting (do not wrap in \`\`\`html code blocks).`;
+
+        try {
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    contents: [
+                        {
+                            parts: [
+                                {
+                                    text: prompt
+                                }
+                            ]
+                        }
+                    ],
+                    tools: [
+                        {
+                            google_search: {}
+                        }
+                    ]
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+
+            const data = await response.json();
+            let htmlContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!htmlContent) {
+                throw new Error("No newsletter HTML returned from Gemini API");
+            }
+
+            // Clean up code block wrappers if any
+            if (htmlContent.includes("```html")) {
+                htmlContent = htmlContent.split("```html")[1].split("```")[0].trim();
+            } else if (htmlContent.includes("```")) {
+                htmlContent = htmlContent.split("```")[1].split("```")[0].trim();
+            }
+
+            const mailTransporter = await getTransporter();
+            const subject = `CloudERP News Digest - ${new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata' })}`;
+            const info = await mailTransporter.sendMail({
+                from: '"CloudERP Daily News" <onboarding@resend.dev>',
+                to: "sanjeyasir@gmail.com",
+                subject,
+                html: htmlContent
+            });
+
+            console.log("Scheduled news sent successfully. Message ID: ", info.messageId);
+
+            await db.collection("emails").add({
+                to: "sanjeyasir@gmail.com",
+                message: {
+                    subject,
+                    html: htmlContent
+                },
+                template: "scheduled_news",
+                createdAt: new Date().toISOString(),
+                status: "sent",
+                messageId: info.messageId
+            });
+
+        } catch (error) {
+            console.error("Error in sendScheduledNews Cloud Function:", error);
+            
+            try {
+                await db.collection("emails").add({
+                    to: "sanjeyasir@gmail.com",
+                    message: {
+                        subject: "CloudERP News Digest Failed",
+                        html: `<p>Failed to generate daily news digest: ${error.message}</p>`
+                    },
+                    template: "scheduled_news",
+                    createdAt: new Date().toISOString(),
+                    status: "failed",
+                    error: error.message
+                });
+            } catch (updateErr) {
+                console.error("Failed to write fail log to Firestore:", updateErr);
+            }
+        }
+    });

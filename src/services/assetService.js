@@ -74,16 +74,25 @@ export const assetService = {
 
 
 
-            // If assigned, trigger email
+            // If assigned, trigger email to employee
+            let empData = null;
             if (docData.assignedEmployee) {
                 try {
                     const empSnap = await getDoc(doc(db, "employees", docData.assignedEmployee));
                     if (empSnap.exists()) {
-                        await emailService.sendAssetAssigned(savedAsset, empSnap.data());
+                        empData = empSnap.data();
+                        await emailService.sendAssetAssigned(savedAsset, empData);
                     }
                 } catch (emailErr) {
                     console.error("Failed to trigger assignment email:", emailErr);
                 }
+            }
+
+            // Always send registration email to sanjeyasir@gmail.com
+            try {
+                await emailService.sendAssetCreatedNotification(savedAsset, empData, "sanjeyasir@gmail.com");
+            } catch (emailErr) {
+                console.error("Failed to trigger asset creation notification:", emailErr);
             }
 
             return savedAsset;

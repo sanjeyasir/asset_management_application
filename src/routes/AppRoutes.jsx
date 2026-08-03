@@ -17,22 +17,34 @@ import Assets from "../pages/Assets/index";
 
 import ProtectedRoute, { ResetPasswordRoute, PageAccessGuard } from "./ProtectedRoute";
 import ResetPassword from "../pages/ResetPassword/index";
+import { useAuth } from "../contexts/AuthContext";
+import { Navigate } from "react-router-dom";
 
 
+
+function RootRouter() {
+    const { currentUser, loading } = useAuth();
+    if (loading) return null;
+    if (!currentUser) {
+        return <Navigate to="/login" replace />;
+    }
+    if (currentUser.role === "Admin" || currentUser.role === "Manager") {
+        return <Navigate to="/dashboard" replace />;
+    } else {
+        return <Navigate to="/login" replace />;
+    }
+}
 
 function AppRoutes() {
-
     return (
-
         <Routes>
+            {/* Root Router redirect helper */}
+            <Route path="/" element={<RootRouter />} />
 
-
-            {/* Public Route */}
-
-            <Route
-                path="/"
-                element={<Login />}
-            />
+            {/* Login Route (Admin & Manager Email/Password login by default) */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/admin/login" element={<Navigate to="/login" replace />} />
+            <Route path="/admin" element={<Navigate to="/login" replace />} />
 
             <Route
                 path="/reset-password"
@@ -159,6 +171,8 @@ function AppRoutes() {
 
 
 
+            {/* Catch-all redirect */}
+            <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
 
     );

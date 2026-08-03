@@ -75,9 +75,9 @@ function Assets() {
                 employeeService.getEmployees(),
             ]);
             setRows(assets);
-            setCategories(cats.filter(c => c.active).map(c => ({ value: c.name, label: c.name })));
-            setDepartments(depts.filter(d => d.active).map(d => ({ value: d.name, label: d.name })));
-            setLocations(locs.filter(l => l.active).map(l => ({ value: l.name, label: l.name })));
+            setCategories(cats.filter(c => c.active).map(c => ({ value: c.id, label: c.name })));
+            setDepartments(depts.filter(d => d.active).map(d => ({ value: d.id, label: d.name })));
+            setLocations(locs.filter(l => l.active).map(l => ({ value: l.id, label: l.name })));
             setEmployees(emps.filter(e => e.status === "Active").map(e => ({ value: e.id, label: `${e.firstName} ${e.lastName} (${e.employeeId})` })));
         } catch {
             showNotification("Failed to load asset data.", "error");
@@ -161,9 +161,10 @@ function Assets() {
                 </Box>
             </Box>
         )},
-        { field: "category", headerName: "Category", flex: 1, renderCell: (p) => (
-            <Typography variant="caption" color="text.secondary" fontWeight="500">{p.value || "—"}</Typography>
-        )},
+        { field: "category", headerName: "Category", flex: 1, renderCell: (p) => {
+            const cat = categories.find(c => c.value === p.value);
+            return <Typography variant="caption" color="text.secondary" fontWeight="500">{cat ? cat.label : p.value || "—"}</Typography>;
+        }},
         { field: "assignedEmployee", headerName: "Assigned To", flex: 1, renderCell: (p) => (
             p.value ? (
                 <Chip label={getEmpName(p.value)} size="small"

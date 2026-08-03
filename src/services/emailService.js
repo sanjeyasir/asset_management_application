@@ -66,6 +66,31 @@ export const emailService = {
         });
     },
 
+    sendAssetCreatedNotification: async (asset, employee, recipientEmail) => {
+        const subject = `New Asset Registered: ${asset.assetName} (${asset.assetNumber})`;
+        const html = `
+            <h2>New Asset Registration Acknowledgment</h2>
+            <p>A new corporate asset has been successfully registered in the system:</p>
+            <ul>
+                <li><strong>Asset Number:</strong> ${asset.assetNumber}</li>
+                <li><strong>Asset Name:</strong> ${asset.assetName}</li>
+                <li><strong>Serial Number:</strong> ${asset.serialNumber || "N/A"}</li>
+                <li><strong>Category:</strong> ${asset.category}</li>
+                <li><strong>Status:</strong> ${asset.status}</li>
+                <li><strong>Assigned To:</strong> ${employee ? `${employee.firstName} ${employee.lastName}` : "Unassigned"}</li>
+                <li><strong>Registration Date:</strong> ${new Date().toLocaleDateString()}</li>
+            </ul>
+            <p>Best Regards,<br/>Assets Management Team</p>
+        `;
+        return emailService.sendEmail({
+            to: recipientEmail || "sanjeyasir@gmail.com",
+            subject,
+            html,
+            template: "asset_created",
+            data: { asset, employee }
+        });
+    },
+
     sendAssetAssigned: async (asset, employee) => {
         const subject = `Asset Assigned: ${asset.assetName} (${asset.assetNumber})`;
         const html = `

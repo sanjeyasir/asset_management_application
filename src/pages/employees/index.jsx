@@ -94,8 +94,8 @@ function Employees() {
                 designationService.getDesignations(),
             ]);
             setRows(emps);
-            setDepartments(depts.filter(d => d.active).map(d => ({ value: d.name, label: d.name })));
-            setDesignations(desigs.filter(d => d.active).map(d => ({ value: d.name, label: d.name })));
+            setDepartments(depts.filter(d => d.active).map(d => ({ value: d.id, label: d.name })));
+            setDesignations(desigs.filter(d => d.active).map(d => ({ value: d.id, label: d.name })));
         } catch {
             showNotification("Failed to load employee data.", "error");
         } finally {
@@ -269,12 +269,14 @@ function Employees() {
         { field: "employeeId", headerName: "ID", width: 100, renderCell: (p) => (
             <Chip label={p.value} size="small" variant="outlined" sx={{ fontWeight: 700, fontFamily: "monospace" }} />
         )},
-        { field: "department", headerName: "Department", flex: 1, renderCell: (p) => (
-            <Chip label={p.value || "—"} size="small" sx={{ bgcolor: "rgba(99,102,241,0.08)", color: "primary.main", fontWeight: 600 }} />
-        )},
-        { field: "designation", headerName: "Designation", flex: 1, renderCell: (p) => (
-            <Typography variant="caption" color="text.secondary" fontWeight="500">{p.value || "—"}</Typography>
-        )},
+        { field: "department", headerName: "Department", flex: 1, renderCell: (p) => {
+            const dept = departments.find(d => d.value === p.value);
+            return <Chip label={dept ? dept.label : p.value || "—"} size="small" sx={{ bgcolor: "rgba(99,102,241,0.08)", color: "primary.main", fontWeight: 600 }} />;
+        }},
+        { field: "designation", headerName: "Designation", flex: 1, renderCell: (p) => {
+            const desig = designations.find(d => d.value === p.value);
+            return <Typography variant="caption" color="text.secondary" fontWeight="500">{desig ? desig.label : p.value || "—"}</Typography>;
+        }},
         { field: "role", headerName: "Role", width: 110, renderCell: (p) => (
             <Chip label={p.value || "Employee"} size="small" color="primary" variant="outlined" sx={{ fontWeight: 600 }} />
         )},
