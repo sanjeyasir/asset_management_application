@@ -243,128 +243,139 @@ exports.resetUserPassword = functions.https.onRequest(async (req, res) => {
 
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 
-exports.sendScheduledNews = onSchedule(
-    {
-        schedule: "0 6,12,18 * * *",
-        timeZone: "Asia/Kolkata"
-    },
-    async (event) => {
-        const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-        let locationName = "Chennai, India";
+async function generateAndSendNews() {
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    let locationName = "Chennai, India";
 
-        try {
-            // Get locations from firestore to customize news
-            const locSnap = await db.collection("locations").get();
-            if (!locSnap.empty) {
-                const activeLocs = [];
-                locSnap.forEach(d => {
-                    const lData = d.data();
-                    if (lData.active && lData.name) {
-                        activeLocs.push(lData.name);
-                    }
-                });
-                // Filter out generic location names
-                const realLocs = activeLocs.filter(name => !["Headquarters", "Branch Office", "Remote"].includes(name));
-                if (realLocs.length > 0) {
-                    locationName = realLocs[0];
-                } else if (activeLocs.length > 0) {
-                    locationName = activeLocs[0];
+    try {
+        // Get locations from firestore to customize news
+        const locSnap = await db.collection("locations").get();
+        if (!locSnap.empty) {
+            const activeLocs = [];
+            locSnap.forEach(d => {
+                const lData = d.data();
+                if (lData.active && lData.name) {
+                    activeLocs.push(lData.name);
                 }
+            });
+            // Filter out generic location names
+            const realLocs = activeLocs.filter(name => !["Headquarters", "Branch Office", "Remote"].includes(name));
+            if (realLocs.length > 0) {
+                locationName = realLocs[0];
+            } else if (activeLocs.length > 0) {
+                locationName = activeLocs[0];
             }
-        } catch (err) {
-            console.error("Failed to query locations collection, using default Chennai, India:", err);
         }
+    } catch (err) {
+        console.error("Failed to query locations collection, using default Chennai, India:", err);
+    }
 
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
-        const prompt = `Get the current weather and top 10 news for ${locationName}. 
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    const prompt = `Get the current weather and top 10 news for ${locationName}. 
+Include current Sri Lankan affairs, local developments, and national news as well.
 Format the output in a highly creative, responsive HTML email newsletter format suitable for sending to a user.
 Include a greeting, weather dashboard section with current temperature, conditions, and high/low forecasts, a news section with the top 10 headlines with brief summaries, and other relevant local information or updates.
 Use a professional, premium visual design (e.g., beautiful typography, consistent spacing, card-based layout, subtle shadows, and an elegant color scheme).
 Ensure all styles are inlined or in a style tag.
 Output ONLY the raw HTML (enclosed in <html> and </html>) with NO markdown formatting (do not wrap in \`\`\`html code blocks).`;
 
-        try {
-            const response = await fetch(url, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    contents: [
-                        {
-                            parts: [
-                                {
-                                    text: prompt
-                                }
-                            ]
-                        }
-                    ],
-                    tools: [
-                        {
-                            google_search: {}
-                        }
-                    ]
-                })
-            });
+    try {
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                contents: [
+                    {
+                        parts: [
+                            {
+                                text: prompt
+                            }
+                        ]
+                    }
+                ]
+            })
+        });
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`HTTP ${response.status}: ${errorText}`);
-            }
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
 
-            const data = await response.json();
-            let htmlContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (!htmlContent) {
-                throw new Error("No newsletter HTML returned from Gemini API");
-            }
+        const data = await response.json();
+        let htmlContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!htmlContent) {
+            throw new Error("No newsletter HTML returned from Gemini API");
+        }
 
-            // Clean up code block wrappers if any
-            if (htmlContent.includes("```html")) {
-                htmlContent = htmlContent.split("```html")[1].split("```")[0].trim();
-            } else if (htmlContent.includes("```")) {
-                htmlContent = htmlContent.split("```")[1].split("```")[0].trim();
-            }
+        // Clean up code block wrappers if any
+        if (htmlContent.includes("```html")) {
+            htmlContent = htmlContent.split("```html")[1].split("```")[0].trim();
+        } else if (htmlContent.includes("```")) {
+            htmlContent = htmlContent.split("```")[1].split("```")[0].trim();
+        }
 
-            const mailTransporter = await getTransporter();
-            const subject = `CloudERP News Digest - ${new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata' })}`;
-            const info = await mailTransporter.sendMail({
-                from: '"CloudERP Daily News" <onboarding@resend.dev>',
-                to: "sanjeyasir@gmail.com",
+        const mailTransporter = await getTransporter();
+        const subject = `CloudERP News Digest - ${new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Colombo' })}`;
+        const info = await mailTransporter.sendMail({
+            from: '"CloudERP Daily News" <onboarding@resend.dev>',
+            to: "sanjeyasir@gmail.com",
+            subject,
+            html: htmlContent
+        });
+
+        console.log("Scheduled news sent successfully. Message ID: ", info.messageId);
+
+        await db.collection("emails").add({
+            to: "sanjeyasir@gmail.com",
+            message: {
                 subject,
                 html: htmlContent
-            });
+            },
+            template: "scheduled_news",
+            createdAt: new Date().toISOString(),
+            status: "sent",
+            messageId: info.messageId
+        });
 
-            console.log("Scheduled news sent successfully. Message ID: ", info.messageId);
-
+    } catch (error) {
+        console.error("Error in sendScheduledNews Cloud Function:", error);
+        
+        try {
             await db.collection("emails").add({
                 to: "sanjeyasir@gmail.com",
                 message: {
-                    subject,
-                    html: htmlContent
+                    subject: "CloudERP News Digest Failed",
+                    html: `<p>Failed to generate daily news digest: ${error.message}</p>`
                 },
                 template: "scheduled_news",
                 createdAt: new Date().toISOString(),
-                status: "sent",
-                messageId: info.messageId
+                status: "failed",
+                error: error.message
             });
-
-        } catch (error) {
-            console.error("Error in sendScheduledNews Cloud Function:", error);
-            
-            try {
-                await db.collection("emails").add({
-                    to: "sanjeyasir@gmail.com",
-                    message: {
-                        subject: "CloudERP News Digest Failed",
-                        html: `<p>Failed to generate daily news digest: ${error.message}</p>`
-                    },
-                    template: "scheduled_news",
-                    createdAt: new Date().toISOString(),
-                    status: "failed",
-                    error: error.message
-                });
-            } catch (updateErr) {
-                console.error("Failed to write fail log to Firestore:", updateErr);
-            }
+        } catch (updateErr) {
+            console.error("Failed to write fail log to Firestore:", updateErr);
         }
-    });
+    }
+}
+
+exports.sendScheduledNews = onSchedule(
+    {
+        schedule: "30 10 * * *",
+        timeZone: "Asia/Colombo"
+    },
+    async (event) => {
+        await generateAndSendNews();
+    }
+);
+
+exports.sendScheduledNewsAfternoon = onSchedule(
+    {
+        schedule: "0 16 * * *",
+        timeZone: "Asia/Colombo"
+    },
+    async (event) => {
+        await generateAndSendNews();
+    }
+);
