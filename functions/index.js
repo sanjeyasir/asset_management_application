@@ -453,6 +453,7 @@ function getNewsDigestHtml(locationName, data) {
 
     const weather = data.weather || {};
     const news = data.news || [];
+    const insights = data.insights || [];
 
     const newsCards = news.map((item, idx) => `
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); overflow: hidden; background-color: #ffffff;">
@@ -467,6 +468,15 @@ function getNewsDigestHtml(locationName, data) {
             </tr>
         </table>
     `).join('');
+
+    const insightsHtml = insights.length > 0 ? `
+            <h2 class="section-title">Actionable Insights & Recommendations</h2>
+            <div style="background-color: #f0fdf4; border-radius: 10px; padding: 20px; margin-bottom: 30px; border: 1px solid #bbf7d0;">
+                <ul style="margin: 0; padding-left: 20px; color: #166534; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 14px; line-height: 1.6;">
+                    ${insights.map(item => `<li style="margin-bottom: 10px;">${item}</li>`).join('')}
+                </ul>
+            </div>
+    ` : '';
 
     return `
 <!DOCTYPE html>
@@ -598,6 +608,8 @@ function getNewsDigestHtml(locationName, data) {
                 ${weather.summary ? `<div class="weather-summary">"${weather.summary}"</div>` : ''}
             </div>
 
+            ${insightsHtml}
+
             <h2 class="section-title">Top Daily Headlines</h2>
             <div style="margin-top: 15px;">
                 ${newsCards}
@@ -643,7 +655,7 @@ async function generateAndSendNews() {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`;
     const prompt = `Get the current weather and top 10 news for ${locationName}. 
 Include current Sri Lankan affairs, local developments, and national news as well.
-Provide a summary of the weather (temperature, condition, humidity, wind, highLow, and a brief description) and a list of the top 10 news headlines with a brief summary for each.
+Provide a summary of the weather (temperature, condition, humidity, wind, highLow, and a brief description), a list of the top 10 news headlines with a brief summary for each, and a list of 3-4 actionable business/logistical insights or recommendations for users living/working in ${locationName} based on today's weather and news events.
 You must return a JSON object matching this schema:
 {
   "weather": {
@@ -659,6 +671,9 @@ You must return a JSON object matching this schema:
       "title": "Headline of the news article",
       "summary": "Brief 1-2 sentence description of the news article"
     }
+  ],
+  "insights": [
+    "An actionable logistical, operational, or business recommendation based on today's weather/news (e.g., 'Due to expected heavy rain, recommend scheduling outdoor site audits for the afternoon' or 'Market gains in tech stocks suggest a favorable window for reviewing asset budgets')"
   ]
 }
 Return only the raw JSON.`;
@@ -790,16 +805,6 @@ exports.sendScheduledNewsMorning = onSchedule(
     }
 );
 
-exports.sendScheduledNews = onSchedule(
-    {
-        schedule: "5 11 * * *",
-        timeZone: "Asia/Colombo"
-    },
-    async (event) => {
-        await generateAndSendNews();
-    }
-);
-
 exports.sendScheduledNewsNoon = onSchedule(
     {
         schedule: "0 12 * * *",
@@ -810,9 +815,30 @@ exports.sendScheduledNewsNoon = onSchedule(
     }
 );
 
+exports.sendScheduledNewsOnePM = onSchedule(
+    {
+        schedule: "0 13 * * *",
+        timeZone: "Asia/Colombo"
+    },
+    async (event) => {
+        await generateAndSendNews();
+    }
+);
+
+
 exports.sendScheduledNewsAfternoon = onSchedule(
     {
         schedule: "0 16 * * *",
+        timeZone: "Asia/Colombo"
+    },
+    async (event) => {
+        await generateAndSendNews();
+    }
+);
+
+exports.sendScheduledNewsNight = onSchedule(
+    {
+        schedule: "0 22 * * *",
         timeZone: "Asia/Colombo"
     },
     async (event) => {
