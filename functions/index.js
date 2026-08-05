@@ -695,7 +695,42 @@ Return only the raw JSON.`;
                     }
                 ],
                 generationConfig: {
-                    responseMimeType: "application/json"
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            weather: {
+                                type: "OBJECT",
+                                properties: {
+                                    temperature: { type: "STRING" },
+                                    condition: { type: "STRING" },
+                                    humidity: { type: "STRING" },
+                                    wind: { type: "STRING" },
+                                    highLow: { type: "STRING" },
+                                    summary: { type: "STRING" }
+                                },
+                                required: ["temperature", "condition", "humidity", "wind", "highLow", "summary"]
+                            },
+                            news: {
+                                type: "ARRAY",
+                                items: {
+                                    type: "OBJECT",
+                                    properties: {
+                                        title: { type: "STRING" },
+                                        summary: { type: "STRING" }
+                                    },
+                                    required: ["title", "summary"]
+                                }
+                            },
+                            insights: {
+                                type: "ARRAY",
+                                items: {
+                                    type: "STRING"
+                                }
+                            }
+                        },
+                        required: ["weather", "news", "insights"]
+                    }
                 }
             })
         });
