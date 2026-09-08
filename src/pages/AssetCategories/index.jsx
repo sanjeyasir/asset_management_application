@@ -1,179 +1,404 @@
-import { useState, useEffect, useCallback } from "react";
-import { Box, Typography, Switch, FormControlLabel, Chip, IconButton, Tooltip, Alert, Divider } from "@mui/material";
-import { Edit, Delete, Add, Save, Close, Category, AccountTree } from "@mui/icons-material";
-import { useForm, Controller } from "react-hook-form";
-import { yupResolver } from "@hookform/resolvers/yup";
-import MasterPage from "../../components/layout/MasterPage";
-import AppDataGrid from "../../components/tables/AppDataGrid";
-import AppButton from "../../components/common/AppButton";
-import AppTextField from "../../components/common/AppTextField";
-import AppSelect from "../../components/common/AppSelect";
-import DeleteDialog from "../../components/dialogs/DeleteDialog";
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  Row,
+  Col,
+  Card,
+  Table,
+  Button,
+  Input,
+  Select,
+  Tag,
+  Space,
+  Modal,
+  Form,
+  Switch,
+  Tooltip,
+  Typography,
+  Alert,
+  Popconfirm
+} from "antd";
+import {
+  PlusOutlined,
+  SearchOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  TagsOutlined,
+  ApartmentOutlined,
+  FileExcelOutlined
+} from "@ant-design/icons";
 import { useNotification } from "../../contexts/NotificationContext";
 import assetCategoryService from "../../services/assetCategoryService";
-import { categorySchema } from "../../validators/schemas";
 
-const EMPTY_FORM = { name: "", parentCategory: "", description: "", active: true };
+const { Title, Text } = Typography;
+const { Option } = Select;
+const { TextArea } = Input;
 
-function AssetCategories() {
-    const { showNotification } = useNotification();
-    const [rows, setRows] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [saving, setSaving] = useState(false);
-    const [editId, setEditId] = useState(null);
-    const [deleteTarget, setDeleteTarget] = useState(null);
-    const [deleting, setDeleting] = useState(false);
-    const [formError, setFormError] = useState("");
+export default function AssetCategories() {
+  const { showNotification } = useNotification();
+  const [form] = Form.useForm();
 
-    const { control, handleSubmit, reset, watch } = useForm({
-        resolver: yupResolver(categorySchema),
-        defaultValues: EMPTY_FORM
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [searchText, setSearchText] = useState("");
+
+  // Modal State
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingCat, setEditingCat] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await assetCategoryService.getCategories();
+      setCategories(data);
+    } catch {
+      showNotification("Failed to load asset categories.", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [showNotification]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleOpenCreate = () => {
+    setEditingCat(null);
+    setFormError("");
+    form.resetFields();
+    form.setFieldsValue({ active: true, parentCategory: null });
+    setModalOpen(true);
+  };
+
+  const handleOpenEdit = (record) => {
+    setEditingCat(record);
+    setFormError("");
+    form.resetFields();
+    form.setFieldsValue({
+      name: record.name,
+      parentCategory: record.parentCategory || null,
+      description: record.description || "",
+      active: record.active ?? true
     });
+    setModalOpen(true);
+  };
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            setRows(await assetCategoryService.getCategories());
-        } catch {
-            showNotification("Failed to load categories.", "error");
-        } finally {
-            setLoading(false);
-        }
-    }, [showNotification]);
+  const handleFormSubmit = async (values) => {
+    setSaving(true);
+    setFormError("");
+    try {
+      const payload = {
+        ...values,
+        parentCategory: values.parentCategory || ""
+      };
+      if (editingCat) {
+        await assetCategoryService.updateCategory(editingCat.id, payload);
+        showNotification("Category updated successfully.", "success");
+      } else {
+        await assetCategoryService.createCategory(payload);
+        showNotification("New category created successfully.", "success");
+      }
+      setModalOpen(false);
+      loadData();
+    } catch (e) {
+      setFormError(e.message || "Failed to save category.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
-    useEffect(() => { load(); }, [load]);
+  const handleDelete = async (id, name) => {
+    try {
+      await assetCategoryService.deleteCategory(id);
+      showNotification(`Category "${name}" deleted.`, "success");
+      loadData();
+    } catch (e) {
+      showNotification(e.message || "Failed to delete category.", "error");
+    }
+  };
 
-    // Build parent options excluding current record (avoid self-parent)
-    const parentOptions = rows
-        .filter(r => r.id !== editId)
-        .map(r => ({ value: r.id, label: r.name }));
+  const handleExportCSV = () => {
+    if (filteredCategories.length === 0) return;
+    const headers = ["Category Name", "Parent Category", "Description", "Status"];
+    const rows = filteredCategories.map((c) => [
+      `"${c.name || ""}"`,
+      `"${getParentName(c.parentCategory) || "Root"}"`,
+      `"${c.description || ""}"`,
+      `"${c.active ? "Active" : "Inactive"}"`
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `asset_categories_export_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
-    const getParentName = (parentId) => rows.find(r => r.id === parentId)?.name || null;
+  const getParentName = (parentId) => categories.find((c) => c.id === parentId)?.name || null;
 
-    const handleRowClick = (params) => {
-        const r = params.row;
-        setEditId(r.id);
-        setFormError("");
-        reset({ name: r.name, parentCategory: r.parentCategory || "", description: r.description || "", active: r.active ?? true });
-    };
+  const parentOptions = categories.filter((c) => !editingCat || c.id !== editingCat.id);
 
-    const handleNew = () => { setEditId(null); setFormError(""); reset(EMPTY_FORM); };
+  const filteredCategories = categories.filter((c) => {
+    if (!searchText) return true;
+    const search = searchText.toLowerCase();
+    return c.name?.toLowerCase().includes(search) || c.description?.toLowerCase().includes(search);
+  });
 
-    const onSubmit = async (data) => {
-        setSaving(true);
-        setFormError("");
-        try {
-            if (editId) {
-                await assetCategoryService.updateCategory(editId, data);
-                showNotification("Category updated.", "success");
-            } else {
-                await assetCategoryService.createCategory(data);
-                showNotification("Category created.", "success");
-            }
-            handleNew();
-            load();
-        } catch (e) {
-            setFormError(e.message || "An error occurred.");
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const handleDeleteConfirm = async () => {
-        setDeleting(true);
-        try {
-            await assetCategoryService.deleteCategory(deleteTarget.id);
-            showNotification(`"${deleteTarget.name}" deleted.`, "success");
-            setDeleteTarget(null);
-            if (editId === deleteTarget.id) handleNew();
-            load();
-        } catch (e) {
-            showNotification(e.message || "Delete failed.", "error");
-        } finally {
-            setDeleting(false);
-        }
-    };
-
-    const columns = [
-        { field: "name", headerName: "Category Name", flex: 1.5, renderCell: (p) => (
-            <Box display="flex" alignItems="center" gap={1.5}>
-                <Box sx={{ p: 0.8, borderRadius: "8px", bgcolor: "rgba(139,92,246,0.1)", color: "#8b5cf6", display: "flex" }}>
-                    {p.row.parentCategory ? <AccountTree fontSize="small" /> : <Category fontSize="small" />}
-                </Box>
-                <Box>
-                    <Typography variant="body2" fontWeight="600">{p.value}</Typography>
-                    {p.row.parentCategory && (
-                        <Typography variant="caption" color="text.secondary">
-                            ↳ {getParentName(p.row.parentCategory) || "Parent"}
-                        </Typography>
-                    )}
-                </Box>
-            </Box>
-        )},
-        { field: "parentCategory", headerName: "Parent", flex: 1, renderCell: (p) => (
-            p.value ? (
-                <Chip label={getParentName(p.value) || "—"} size="small" variant="outlined"
-                    icon={<AccountTree sx={{ fontSize: "12px !important" }} />} sx={{ fontWeight: 500 }} />
-            ) : (
-                <Chip label="Root Category" size="small" color="primary" variant="outlined" sx={{ fontWeight: 600 }} />
-            )
-        )},
-        { field: "active", headerName: "Status", width: 100, renderCell: (p) => (
-            <Chip label={p.value ? "Active" : "Inactive"} size="small" color={p.value ? "success" : "default"} sx={{ fontWeight: 600 }} />
-        )},
-        { field: "actions", headerName: "", width: 90, sortable: false, renderCell: (p) => (
-            <Box display="flex">
-                <Tooltip title="Edit"><IconButton size="small" onClick={(e) => { e.stopPropagation(); handleRowClick({ row: p.row }); }}><Edit fontSize="small" /></IconButton></Tooltip>
-                <Tooltip title="Delete"><IconButton size="small" color="error" onClick={(e) => { e.stopPropagation(); setDeleteTarget(p.row); }}><Delete fontSize="small" /></IconButton></Tooltip>
-            </Box>
-        )},
-    ];
-
-    const formPanel = (
-        <Box component="form" onSubmit={handleSubmit(onSubmit)} noValidate>
-            <Box display="flex" justifyContent="space-between" alignItems="center" px={3} py={2} sx={{ borderBottom: "1px solid", borderColor: "divider" }}>
-                <Box>
-                    <Typography variant="h6" fontWeight="700">{editId ? "Edit Category" : "New Category"}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                        {editId ? "Update category details" : "Leave Parent empty to create a root category"}
-                    </Typography>
-                </Box>
-                {editId && <Tooltip title="Clear"><IconButton size="small" onClick={handleNew}><Close fontSize="small" /></IconButton></Tooltip>}
-            </Box>
-            <Box px={3} py={3} display="flex" flexDirection="column" gap={2.5}>
-                {formError && <Alert severity="error" sx={{ borderRadius: 2 }}>{formError}</Alert>}
-                <AppTextField name="name" control={control} label="Category Name *" />
-                <AppSelect name="parentCategory" control={control} label="Parent Category (optional)" options={parentOptions} />
-                <AppTextField name="description" control={control} label="Description" multiline rows={2} />
-                <Controller name="active" control={control} render={({ field }) => (
-                    <FormControlLabel control={<Switch checked={!!field.value} onChange={field.onChange} color="success" />}
-                        label={<Typography variant="body2" fontWeight="600">Active</Typography>} />
-                )} />
-            </Box>
-            <Divider />
-            <Box display="flex" gap={1.5} px={3} py={2} justifyContent="flex-end">
-                <AppButton variant="outlined" color="inherit" onClick={handleNew} disabled={saving}>Clear</AppButton>
-                <AppButton type="submit" loading={saving} startIcon={editId ? <Save /> : <Add />}>
-                    {editId ? "Update" : "Create Category"}
-                </AppButton>
-            </Box>
-        </Box>
-    );
-
-    return (
-        <>
-            <MasterPage
-                title="Asset Categories"
-                subtitle="Hierarchical category management — supports parent/child structures"
-                breadcrumbs={[{ label: "Master Registry" }, { label: "Asset Categories" }]}
-                action={<AppButton startIcon={<Add />} onClick={handleNew}>New Category</AppButton>}
-                gridPanel={<AppDataGrid rows={rows} columns={columns} loading={loading} onRowClick={handleRowClick} exportFileName="asset_categories.csv" placeholder="Search categories..." />}
-                formPanel={formPanel}
+  const columns = [
+    {
+      title: "Category Name",
+      dataIndex: "name",
+      key: "name",
+      render: (text, record) => (
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              padding: "8px",
+              borderRadius: 8,
+              background: "rgba(139, 92, 246, 0.08)",
+              color: "#8b5cf6",
+              display: "flex"
+            }}
+          >
+            <TagsOutlined style={{ fontSize: 18 }} />
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, color: "#0f172a", fontSize: "0.92rem" }}>
+              {text}
+            </div>
+            {record.parentCategory && (
+              <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                ↳ Subcategory of {getParentName(record.parentCategory) || "Parent"}
+              </div>
+            )}
+          </div>
+        </div>
+      )
+    },
+    {
+      title: "Hierarchy Level",
+      dataIndex: "parentCategory",
+      key: "parentCategory",
+      render: (parentId) => (
+        parentId ? (
+          <Tag color="purple" style={{ fontWeight: 600 }}>
+            {getParentName(parentId) || "Sub-Category"}
+          </Tag>
+        ) : (
+          <Tag color="blue" style={{ fontWeight: 600 }}>
+            Root Category
+          </Tag>
+        )
+      )
+    },
+    {
+      title: "Description",
+      dataIndex: "description",
+      key: "description",
+      render: (desc) => (
+        <span style={{ color: "#64748b", fontSize: "0.85rem" }}>
+          {desc || "—"}
+        </span>
+      )
+    },
+    {
+      title: "Status",
+      dataIndex: "active",
+      key: "active",
+      render: (active) => (
+        <Tag color={active ? "success" : "default"} style={{ fontWeight: 600 }}>
+          {active ? "Active" : "Inactive"}
+        </Tag>
+      )
+    },
+    {
+      title: "Actions",
+      key: "actions",
+      align: "right",
+      render: (_, record) => (
+        <Space size="small">
+          <Tooltip title="Edit Category">
+            <Button
+              type="text"
+              icon={<EditOutlined style={{ color: "#10b981", fontSize: 16 }} />}
+              onClick={() => handleOpenEdit(record)}
             />
-            <DeleteDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm}
-                loading={deleting} message={`Delete "${deleteTarget?.name}"? Subcategories must be removed first.`} />
-        </>
-    );
-}
+          </Tooltip>
+          <Tooltip title="Delete Category">
+            <Popconfirm
+              title="Delete Category"
+              description={`Delete "${record.name}"? Ensure no assets or subcategories are attached.`}
+              onConfirm={() => handleDelete(record.id, record.name)}
+              okText="Delete"
+              cancelText="Cancel"
+              okButtonProps={{ danger: true }}
+            >
+              <Button type="text" danger icon={<DeleteOutlined style={{ fontSize: 16 }} />} />
+            </Popconfirm>
+          </Tooltip>
+        </Space>
+      )
+    }
+  ];
 
-export default AssetCategories;
+  return (
+    <div style={{ paddingBottom: 24 }}>
+      {/* Page Header */}
+      <Row justify="space-between" align="middle" style={{ marginBottom: 24 }}>
+        <Col>
+          <Title level={2} style={{ margin: 0, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>
+            Asset Categories
+          </Title>
+          <Text type="secondary" style={{ fontSize: "0.92rem" }}>
+            Define hierarchical classifications, parent/child groups, and equipment category taxonomies.
+          </Text>
+        </Col>
+        <Col>
+          <Space>
+            <Button
+              icon={<FileExcelOutlined />}
+              onClick={handleExportCSV}
+              style={{ borderRadius: 8, fontWeight: 600 }}
+            >
+              Export CSV
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={handleOpenCreate}
+              size="large"
+              style={{
+                borderRadius: 8,
+                background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                border: "none",
+                fontWeight: 700,
+                boxShadow: "0 4px 12px rgba(99, 102, 241, 0.25)"
+              }}
+            >
+              New Category
+            </Button>
+          </Space>
+        </Col>
+      </Row>
+
+      {/* Filter and Search Bar */}
+      <Card
+        bordered
+        style={{ marginBottom: 20, borderRadius: 14, border: "1px solid #e2e8f0" }}
+        styles={{ body: { padding: "16px 20px" } }}
+      >
+        <Row gutter={[16, 16]} align="middle">
+          <Col xs={24} sm={12} md={8}>
+            <Input
+              prefix={<SearchOutlined style={{ color: "#94a3b8" }} />}
+              placeholder="Search categories..."
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              allowClear
+              style={{ borderRadius: 8 }}
+            />
+          </Col>
+        </Row>
+      </Card>
+
+      {/* Table Card */}
+      <Card
+        bordered
+        style={{ borderRadius: 16, border: "1px solid #e2e8f0" }}
+        styles={{ body: { padding: 0 } }}
+      >
+        <Table
+          dataSource={filteredCategories}
+          columns={columns}
+          rowKey="id"
+          loading={loading}
+          pagination={{ pageSize: 10 }}
+        />
+      </Card>
+
+      {/* Create / Edit Modal */}
+      <Modal
+        title={
+          <span style={{ fontWeight: 700, fontSize: "1.1rem", color: "#0f172a" }}>
+            {editingCat ? "Edit Category" : "Add New Category"}
+          </span>
+        }
+        open={modalOpen}
+        onCancel={() => setModalOpen(false)}
+        footer={null}
+        width={500}
+        centered
+        styles={{ content: { borderRadius: 16, background: "#ffffff" } }}
+      >
+        {formError && <Alert message={formError} type="error" showIcon style={{ marginBottom: 16, borderRadius: 8 }} />}
+
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleFormSubmit}
+          requiredMark={true}
+          style={{ marginTop: 16 }}
+        >
+          <Form.Item
+            name="name"
+            label={<span style={{ color: "#475569", fontWeight: 600 }}>Category Name</span>}
+            rules={[{ required: true, message: "Category Name is required." }]}
+          >
+            <Input placeholder="e.g. Laptops & Workstations" size="large" style={{ borderRadius: 8 }} />
+          </Form.Item>
+
+          <Form.Item
+            name="parentCategory"
+            label={<span style={{ color: "#475569", fontWeight: 600 }}>Parent Category (Optional)</span>}
+          >
+            <Select placeholder="Leave empty for Root Category" allowClear size="large" style={{ borderRadius: 8 }}>
+              {parentOptions.map((c) => (
+                <Option key={c.id} value={c.id}>
+                  {c.name}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="description"
+            label={<span style={{ color: "#475569", fontWeight: 600 }}>Description (Optional)</span>}
+          >
+            <TextArea placeholder="Category description or usage guidelines" rows={3} style={{ borderRadius: 8 }} />
+          </Form.Item>
+
+          <Form.Item
+            name="active"
+            valuePropName="checked"
+            label={<span style={{ color: "#475569", fontWeight: 600 }}>Active Status</span>}
+          >
+            <Switch checkedChildren="Active" unCheckedChildren="Inactive" />
+          </Form.Item>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 16 }}>
+            <Button onClick={() => setModalOpen(false)} style={{ borderRadius: 8 }} disabled={saving}>
+              Cancel
+            </Button>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={saving}
+              style={{
+                borderRadius: 8,
+                fontWeight: 700,
+                background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                border: "none",
+                boxShadow: "0 4px 12px rgba(99, 102, 241, 0.25)"
+              }}
+            >
+              {editingCat ? "Save Changes" : "Create Category"}
+            </Button>
+          </div>
+        </Form>
+      </Modal>
+    </div>
+  );
+}

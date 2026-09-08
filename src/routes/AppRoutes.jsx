@@ -28,11 +28,7 @@ function RootRouter() {
     if (!currentUser) {
         return <Navigate to="/login" replace />;
     }
-    if (currentUser.role === "Admin" || currentUser.role === "Manager") {
-        return <Navigate to="/dashboard" replace />;
-    } else {
-        return <Navigate to="/login" replace />;
-    }
+    return <Navigate to="/dashboard" replace />;
 }
 
 function AppRoutes() {

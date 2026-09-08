@@ -3,6 +3,17 @@ import { db } from "../config/firebase";
 
 const COLLECTION_NAME = "assetCategories";
 
+const sanitizeData = (data) => {
+    if (!data || typeof data !== "object") return {};
+    const clean = {};
+    for (const [key, value] of Object.entries(data)) {
+        if (value !== undefined) {
+            clean[key] = value;
+        }
+    }
+    return clean;
+};
+
 export const assetCategoryService = {
     getCategories: async () => {
         try {
@@ -33,12 +44,12 @@ export const assetCategoryService = {
 
     createCategory: async (data) => {
         try {
-            const docData = {
+            const docData = sanitizeData({
                 ...data,
                 parentCategory: data.parentCategory || "", // Holds ID of parent category
                 active: data.active ?? true,
                 createdAt: new Date().toISOString()
-            };
+            });
             const docRef = await addDoc(collection(db, COLLECTION_NAME), docData);
             
             return { id: docRef.id, ...docData };
@@ -62,11 +73,11 @@ export const assetCategoryService = {
                 throw new Error("A category cannot be its own parent.");
             }
 
-            const updateData = {
+            const updateData = sanitizeData({
                 ...data,
                 parentCategory: data.parentCategory || "",
                 updatedAt: new Date().toISOString()
-            };
+            });
 
             await updateDoc(docRef, updateData);
             

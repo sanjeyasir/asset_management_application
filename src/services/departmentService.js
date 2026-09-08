@@ -4,6 +4,17 @@ import { db } from "../config/firebase";
 
 const COLLECTION_NAME = "departments";
 
+const sanitizeData = (data) => {
+    if (!data || typeof data !== "object") return {};
+    const clean = {};
+    for (const [key, value] of Object.entries(data)) {
+        if (value !== undefined) {
+            clean[key] = value;
+        }
+    }
+    return clean;
+};
+
 export const departmentService = {
     getDepartments: async () => {
         try {
@@ -34,20 +45,12 @@ export const departmentService = {
 
     createDepartment: async (data) => {
         try {
-
-            console.log("Creating department:", data);
-
             const q = query(
                 collection(db, COLLECTION_NAME),
                 where("code", "==", data.code)
             );
 
-            console.log("Creating department:1", q);
-
             const querySnap = await getDocs(q);
-
-            console.log("Duplicate check result:", querySnap);
-
 
             if (!querySnap.empty) {
                 throw new Error(
@@ -55,42 +58,26 @@ export const departmentService = {
                 );
             }
 
-
-            const docData = {
+            const docData = sanitizeData({
                 ...data,
                 active: data.active ?? true,
                 createdAt: new Date().toISOString()
-            };
-
-
-            console.log("Saving data:", docData);
-
+            });
 
             const docRef = await addDoc(
                 collection(db, COLLECTION_NAME),
                 docData
             );
 
-
-            console.log(
-                "Document created with ID:",
-                docRef.id
-            );
-
-
             return {
                 id: docRef.id,
                 ...docData
             };
-
-
         } catch (error) {
-
             console.error(
                 "CREATE DEPARTMENT ERROR:",
                 error
             );
-
             throw error;
         }
     },
@@ -113,14 +100,12 @@ export const departmentService = {
                 }
             }
 
-            const updateData = {
+            const updateData = sanitizeData({
                 ...data,
                 updatedAt: new Date().toISOString()
-            };
+            });
 
             await updateDoc(docRef, updateData);
-
-
 
             return { id, ...oldValue, ...updateData };
         } catch (error) {

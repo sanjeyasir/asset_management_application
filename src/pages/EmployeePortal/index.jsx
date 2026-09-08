@@ -1,295 +1,288 @@
 import React, { useState, useEffect } from "react";
 import { Navigate } from "react-router-dom";
+import { Row, Col, Card, Typography, Button, Table, Tag, Avatar, Space, Divider, Spin } from "antd";
+import {
+  UserOutlined,
+  LogoutOutlined,
+  DesktopOutlined,
+  MailOutlined,
+  PhoneOutlined,
+  CalendarOutlined,
+  IdcardOutlined,
+  SafetyCertificateOutlined,
+  DatabaseOutlined
+} from "@ant-design/icons";
 import { useAuth } from "../../contexts/AuthContext";
 import { db } from "../../config/firebase";
 import { collection, query, where, getDocs } from "firebase/firestore";
-import {
-    Box,
-    Container,
-    Typography,
-    Button,
-    Paper,
-    Card,
-    CardContent,
-    Divider,
-    Stack,
-    CircularProgress,
-    Grid,
-    Table,
-    TableBody,
-    TableCell,
-    TableContainer,
-    TableHead,
-    TableRow,
-    Chip
-} from "@mui/material";
-import BadgeIcon from "@mui/icons-material/Badge";
-import PersonIcon from "@mui/icons-material/Person";
-import LogoutIcon from "@mui/icons-material/Logout";
-import DevicesIcon from "@mui/icons-material/Devices";
-import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
-import EmailIcon from "@mui/icons-material/Email";
-import PhoneIcon from "@mui/icons-material/Phone";
 import assetCategoryService from "../../services/assetCategoryService";
 
+const { Title, Text } = Typography;
+
 export function EmployeePortal() {
-    const { currentUser, logout } = useAuth();
-    const [assets, setAssets] = useState([]);
-    const [loadingAssets, setLoadingAssets] = useState(false);
-    const [categories, setCategories] = useState([]);
+  const { currentUser, logout } = useAuth();
+  const [assets, setAssets] = useState([]);
+  const [loadingAssets, setLoadingAssets] = useState(false);
+  const [categories, setCategories] = useState([]);
 
-    // Fetch assigned assets if logged in
-    useEffect(() => {
-        if (currentUser && currentUser.uid) {
-            const fetchAssets = async () => {
-                setLoadingAssets(true);
-                try {
-                    const [assetSnap, catList] = await Promise.all([
-                        getDocs(query(collection(db, "assets"), where("assignedEmployee", "==", currentUser.uid))),
-                        assetCategoryService.getCategories()
-                    ]);
-                    const list = assetSnap.docs.map((doc) => ({
-                        id: doc.id,
-                        ...doc.data()
-                    }));
-                    setAssets(list);
-                    setCategories(catList);
-                } catch (err) {
-                    console.error("Error loading employee assets:", err);
-                } finally {
-                    setLoadingAssets(false);
-                }
-            };
-            fetchAssets();
-        } else {
-            setAssets([]);
+  useEffect(() => {
+    if (currentUser) {
+      const fetchAssets = async () => {
+        setLoadingAssets(true);
+        try {
+          const [assetSnap, catList] = await Promise.all([
+            getDocs(collection(db, "assets")),
+            assetCategoryService.getCategories()
+          ]);
+          const allAssets = assetSnap.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+
+          const myName = (currentUser.fullName || `${currentUser.firstName || ""} ${currentUser.lastName || ""}`).trim().toLowerCase();
+          const myEmail = (currentUser.email || "").toLowerCase();
+          const myUid = currentUser.uid || currentUser.id || "";
+
+          const userAssets = allAssets.filter((a) => {
+            if (a.assignedEmployee === myUid) return true;
+            if (myEmail && (a.assignedEmployeeEmail?.toLowerCase() === myEmail || a.email?.toLowerCase() === myEmail)) return true;
+            if (myName && a.assignedEmployeeName?.toLowerCase() === myName) return true;
+            return false;
+          });
+
+          setAssets(userAssets);
+          setCategories(catList);
+        } catch (err) {
+          console.error("Error loading employee assets:", err);
+        } finally {
+          setLoadingAssets(false);
         }
-    }, [currentUser]);
-
-    // 1. LOGIN SCREEN VIEW
-    if (!currentUser) {
-        return <Navigate to="/login" replace />;
+      };
+      fetchAssets();
+    } else {
+      setAssets([]);
     }
+  }, [currentUser]);
 
-    // 2. LOGGED IN PORTAL VIEW
-    return (
-        <Box sx={{ minHeight: "100vh", bgcolor: "#f8fafc", pb: 6 }}>
-            {/* Header / Nav */}
-            <Box
-                sx={{
-                    bgcolor: "background.paper",
-                    py: 2,
-                    borderBottom: "1px solid rgba(0,0,0,0.06)",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.02)"
-                }}
+  if (!currentUser) {
+    return <Navigate to="/login" replace />;
+  }
+
+  const username = currentUser.fullName || `${currentUser.firstName || ""} ${currentUser.lastName || ""}` || currentUser.email || "Employee";
+  const initials = (currentUser.firstName ? `${currentUser.firstName[0]}${currentUser.lastName?.[0] || ""}` : username.substring(0, 2)).toUpperCase();
+
+  const getCategoryName = (id) => categories.find((c) => c.id === id)?.name || id || "—";
+
+  const columns = [
+    {
+      title: "Asset Name",
+      dataIndex: "assetName",
+      key: "assetName",
+      render: (text, record) => (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div
+            style={{
+              padding: "6px 8px",
+              borderRadius: 8,
+              background: "rgba(99, 102, 241, 0.08)",
+              color: "#6366f1",
+              display: "flex"
+            }}
+          >
+            <DesktopOutlined style={{ fontSize: 16 }} />
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, color: "#0f172a" }}>{text}</div>
+            <div style={{ fontSize: "0.75rem", color: "#64748b", fontFamily: "monospace" }}>
+              {record.assetNumber || record.assetTag || "—"}
+            </div>
+          </div>
+        </div>
+      )
+    },
+    {
+      title: "Category",
+      dataIndex: "category",
+      key: "category",
+      render: (catId) => (
+        <Tag color="purple" style={{ fontWeight: 600 }}>
+          {getCategoryName(catId)}
+        </Tag>
+      )
+    },
+    {
+      title: "Serial Number",
+      dataIndex: "serialNumber",
+      key: "serialNumber",
+      render: (sn) => (
+        <span style={{ fontFamily: "monospace", color: "#475569" }}>{sn || "—"}</span>
+      )
+    },
+    {
+      title: "Status",
+      dataIndex: "status",
+      key: "status",
+      render: (status) => (
+        <Tag color={status === "Faulty" ? "error" : "success"} style={{ fontWeight: 600 }}>
+          {status || "Assigned"}
+        </Tag>
+      )
+    }
+  ];
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#f8fafc", display: "flex", flexDirection: "column" }}>
+      {/* Top Header */}
+      <div
+        style={{
+          background: "rgba(255, 255, 255, 0.85)",
+          backdropFilter: "blur(12px)",
+          borderBottom: "1px solid #e2e8f0",
+          padding: "0 32px",
+          height: 64,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between"
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#ffffff"
+            }}
+          >
+            <DatabaseOutlined style={{ fontSize: 20 }} />
+          </div>
+          <div>
+            <span style={{ fontWeight: 800, fontSize: "1.05rem", color: "#0f172a" }}>
+              Enterprise Employee Portal
+            </span>
+            <div style={{ fontSize: "0.72rem", color: "#64748b" }}>
+              Self Service & Equipment Management
+            </div>
+          </div>
+        </div>
+
+        <Button
+          type="default"
+          danger
+          icon={<LogoutOutlined />}
+          onClick={logout}
+          style={{ borderRadius: 8, fontWeight: 600 }}
+        >
+          Sign Out
+        </Button>
+      </div>
+
+      {/* Main Content */}
+      <div style={{ maxWidth: 1200, width: "100%", margin: "32px auto", padding: "0 24px", flexGrow: 1 }}>
+        <Row gutter={[24, 24]}>
+          {/* Profile Card */}
+          <Col xs={24} md={8}>
+            <Card
+              bordered
+              style={{ borderRadius: 16, border: "1px solid #e2e8f0", background: "#ffffff" }}
+              styles={{ body: { padding: "32px 24px" } }}
             >
-                <Container maxWidth="lg">
-                    <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center" }}>
-                        <Stack direction="row" sx={{ alignItems: "center", gap: 1.5 }}>
-                            <Box
-                                sx={{
-                                    width: 40,
-                                    height: 40,
-                                    borderRadius: 2,
-                                    bgcolor: "primary.main",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    color: "white"
-                                }}
-                            >
-                                <BadgeIcon />
-                            </Box>
-                            <Box>
-                                <Typography variant="h6" sx={{ fontWeight: "bold", color: "text.primary" }}>
-                                    Enterprise Portal
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                    Self Service & Asset Overview
-                                </Typography>
-                            </Box>
-                        </Stack>
-                        <Button
-                            variant="outlined"
-                            color="error"
-                            startIcon={<LogoutIcon />}
-                            onClick={logout}
-                            sx={{ borderRadius: 2, textTransform: "none", fontWeight: "bold" }}
-                        >
-                            Sign Out
-                        </Button>
-                    </Stack>
-                </Container>
-            </Box>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", marginBottom: 24 }}>
+                <Avatar
+                  size={76}
+                  style={{
+                    backgroundColor: "#10b981",
+                    fontSize: 28,
+                    fontWeight: 700,
+                    marginBottom: 12,
+                    boxShadow: "0 4px 14px rgba(16, 185, 129, 0.25)"
+                  }}
+                >
+                  {initials}
+                </Avatar>
+                <Title level={4} style={{ margin: 0, fontWeight: 800, color: "#0f172a" }}>
+                  {username}
+                </Title>
+                <Tag color="blue" style={{ marginTop: 8, fontWeight: 700 }}>
+                  {currentUser.role || "Employee"}
+                </Tag>
+              </div>
 
-            <Container maxWidth="lg" sx={{ mt: 4 }}>
-                <Grid container spacing={4}>
-                    {/* Column 1: Profile Details */}
-                    <Grid item xs={12} md={4}>
-                        <Card
-                            elevation={0}
-                            sx={{
-                                border: "1px solid rgba(0,0,0,0.06)",
-                                borderRadius: 4,
-                                boxShadow: "0 4px 20px rgba(0,0,0,0.02)"
-                            }}
-                        >
-                            <CardContent sx={{ p: 4 }}>
-                                <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", mb: 3 }}>
-                                    <Avatar
-                                        sx={{
-                                            width: 80,
-                                            height: 80,
-                                            bgcolor: "primary.light",
-                                            fontSize: 32,
-                                            fontWeight: "bold",
-                                            mb: 2
-                                        }}
-                                    >
-                                        {currentUser.firstName?.[0] || currentUser.fullName?.[0] || "?"}
-                                    </Avatar>
-                                    <Typography variant="h6" sx={{ fontWeight: "bold", color: "text.primary" }}>
-                                        {currentUser.fullName || `${currentUser.firstName || ""} ${currentUser.lastName || ""}`}
-                                    </Typography>
-                                    <Chip
-                                        label={currentUser.role || "Employee"}
-                                        color="primary"
-                                        size="small"
-                                        variant="outlined"
-                                        sx={{ mt: 1, fontWeight: "bold" }}
-                                    />
-                                </Box>
+              <Divider style={{ margin: "16px 0" }} />
 
-                                <Divider sx={{ my: 2 }} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <IdcardOutlined style={{ fontSize: 18, color: "#6366f1" }} />
+                  <div>
+                    <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Employee ID</div>
+                    <div style={{ fontWeight: 700, color: "#0f172a", fontFamily: "monospace" }}>
+                      {currentUser.employeeId || "—"}
+                    </div>
+                  </div>
+                </div>
 
-                                <Stack spacing={2}>
-                                    <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
-                                        <PersonIcon sx={{ color: "text.secondary" }} />
-                                        <Box>
-                                            <Typography variant="caption" color="text.secondary">
-                                                Employee ID
-                                            </Typography>
-                                            <Typography variant="body2" sx={{ fontWeight: "bold" }}>
-                                                {currentUser.employeeId}
-                                            </Typography>
-                                        </Box>
-                                    </Stack>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <MailOutlined style={{ fontSize: 18, color: "#6366f1" }} />
+                  <div>
+                    <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Email Address</div>
+                    <div style={{ fontWeight: 600, color: "#0f172a", fontSize: "0.88rem" }}>
+                      {currentUser.email || "—"}
+                    </div>
+                  </div>
+                </div>
 
-                                    <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
-                                        <EmailIcon sx={{ color: "text.secondary" }} />
-                                        <Box>
-                                            <Typography variant="caption" color="text.secondary">
-                                                Email Address
-                                            </Typography>
-                                            <Typography variant="body2" sx={{ fontWeight: "bold" }}>
-                                                {currentUser.email}
-                                            </Typography>
-                                        </Box>
-                                    </Stack>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <PhoneOutlined style={{ fontSize: 18, color: "#6366f1" }} />
+                  <div>
+                    <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Phone Number</div>
+                    <div style={{ fontWeight: 600, color: "#0f172a", fontSize: "0.88rem" }}>
+                      {currentUser.mobileNumber || "—"}
+                    </div>
+                  </div>
+                </div>
 
-                                    <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
-                                        <PhoneIcon sx={{ color: "text.secondary" }} />
-                                        <Box>
-                                            <Typography variant="caption" color="text.secondary">
-                                                Phone Number
-                                            </Typography>
-                                            <Typography variant="body2" sx={{ fontWeight: "bold" }}>
-                                                {currentUser.mobileNumber || "-"}
-                                            </Typography>
-                                        </Box>
-                                    </Stack>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <CalendarOutlined style={{ fontSize: 18, color: "#6366f1" }} />
+                  <div>
+                    <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Date Joined</div>
+                    <div style={{ fontWeight: 600, color: "#0f172a", fontSize: "0.88rem" }}>
+                      {currentUser.dateOfJoin || "—"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </Col>
 
-                                    <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
-                                        <CalendarTodayIcon sx={{ color: "text.secondary" }} />
-                                        <Box>
-                                            <Typography variant="caption" color="text.secondary">
-                                                Joining Date
-                                            </Typography>
-                                            <Typography variant="body2" sx={{ fontWeight: "bold" }}>
-                                                {currentUser.dateOfJoin || "-"}
-                                            </Typography>
-                                        </Box>
-                                    </Stack>
-                                </Stack>
-                            </CardContent>
-                        </Card>
-                    </Grid>
-
-                    {/* Column 2: Allocated Assets */}
-                    <Grid item xs={12} md={8}>
-                        <Card
-                            elevation={0}
-                            sx={{
-                                border: "1px solid rgba(0,0,0,0.06)",
-                                borderRadius: 4,
-                                boxShadow: "0 4px 20px rgba(0,0,0,0.02)",
-                                minHeight: 350
-                            }}
-                        >
-                            <CardContent sx={{ p: 4 }}>
-                                <Typography
-                                    variant="h6"
-                                    sx={{
-                                        fontWeight: "bold",
-                                        color: "text.primary",
-                                        mb: 3,
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: 1
-                                    }}
-                                >
-                                    <DevicesIcon color="primary" /> Assigned Assets ({assets.length})
-                                </Typography>
-
-                                {loadingAssets ? (
-                                    <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
-                                        <CircularProgress />
-                                    </Box>
-                                ) : assets.length === 0 ? (
-                                    <Box sx={{ py: 8, textAlign: "center", color: "text.secondary" }}>
-                                        <DevicesIcon sx={{ fontSize: 48, mb: 1, opacity: 0.5 }} />
-                                        <Typography variant="body1">No assets currently assigned to you.</Typography>
-                                    </Box>
-                                ) : (
-                                    <TableContainer component={Box} sx={{ border: "1px solid rgba(0,0,0,0.06)", borderRadius: 2 }}>
-                                        <Table>
-                                            <TableHead sx={{ bgcolor: "#f8fafc" }}>
-                                                <TableRow>
-                                                    <TableCell sx={{ fontWeight: "bold" }}>Asset Name</TableCell>
-                                                    <TableCell sx={{ fontWeight: "bold" }}>Category</TableCell>
-                                                    <TableCell sx={{ fontWeight: "bold" }}>Asset Tag</TableCell>
-                                                    <TableCell sx={{ fontWeight: "bold" }}>Serial Number</TableCell>
-                                                    <TableCell sx={{ fontWeight: "bold" }}>Status</TableCell>
-                                                </TableRow>
-                                            </TableHead>
-                                            <TableBody>
-                                                {assets.map((asset) => (
-                                                    <TableRow key={asset.id}>
-                                                        <TableCell>{asset.assetName}</TableCell>
-                                                        <TableCell>{categories.find(c => c.id === asset.category)?.name || asset.category || "-"}</TableCell>
-                                                        <TableCell><code>{asset.assetTag}</code></TableCell>
-                                                        <TableCell>{asset.serialNumber || "-"}</TableCell>
-                                                        <TableCell>
-                                                            <Chip
-                                                                label={asset.status || "Assigned"}
-                                                                color={asset.status === "Faulty" ? "error" : "success"}
-                                                                size="small"
-                                                                sx={{ fontWeight: "bold" }}
-                                                            />
-                                                        </TableCell>
-                                                    </TableRow>
-                                                ))}
-                                            </TableBody>
-                                        </Table>
-                                    </TableContainer>
-                                )}
-                            </CardContent>
-                        </Card>
-                    </Grid>
-                </Grid>
-            </Container>
-        </Box>
-    );
+          {/* Assigned Equipment Table */}
+          <Col xs={24} md={16}>
+            <Card
+              title={
+                <span style={{ fontWeight: 800, color: "#0f172a", display: "flex", alignItems: "center", gap: 8 }}>
+                  <DesktopOutlined style={{ color: "#6366f1" }} /> Assigned Equipment ({assets.length})
+                </span>
+              }
+              bordered
+              style={{ borderRadius: 16, border: "1px solid #e2e8f0", background: "#ffffff" }}
+            >
+              <Table
+                dataSource={assets}
+                columns={columns}
+                rowKey="id"
+                loading={loadingAssets}
+                pagination={false}
+                locale={{ emptyText: "No equipment or assets currently assigned to your profile." }}
+              />
+            </Card>
+          </Col>
+        </Row>
+      </div>
+    </div>
+  );
 }
 
 export default EmployeePortal;

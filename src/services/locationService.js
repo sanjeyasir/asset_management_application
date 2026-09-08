@@ -4,6 +4,17 @@ import { db } from "../config/firebase";
 
 const COLLECTION_NAME = "locations";
 
+const sanitizeData = (data) => {
+    if (!data || typeof data !== "object") return {};
+    const clean = {};
+    for (const [key, value] of Object.entries(data)) {
+        if (value !== undefined) {
+            clean[key] = value;
+        }
+    }
+    return clean;
+};
+
 export const locationService = {
     getLocations: async () => {
         try {
@@ -34,14 +45,12 @@ export const locationService = {
 
     createLocation: async (data) => {
         try {
-            const docData = {
+            const docData = sanitizeData({
                 ...data,
                 active: data.active ?? true,
                 createdAt: new Date().toISOString()
-            };
+            });
             const docRef = await addDoc(collection(db, COLLECTION_NAME), docData);
-            
-
             
             return { id: docRef.id, ...docData };
         } catch (error) {
@@ -59,15 +68,13 @@ export const locationService = {
             }
             const oldValue = docSnap.data();
 
-            const updateData = {
+            const updateData = sanitizeData({
                 ...data,
                 updatedAt: new Date().toISOString()
-            };
+            });
 
             await updateDoc(docRef, updateData);
             
-
-
             return { id, ...oldValue, ...updateData };
         } catch (error) {
             console.error("Error in updateLocation:", error);

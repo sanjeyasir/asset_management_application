@@ -23,6 +23,17 @@ const generateNextEmployeeId = async () => {
     return `EMP-${nextNumber.toString().padStart(4, "0")}`;
 };
 
+const sanitizeData = (data) => {
+    if (!data || typeof data !== "object") return {};
+    const clean = {};
+    for (const [key, value] of Object.entries(data)) {
+        if (value !== undefined) {
+            clean[key] = value;
+        }
+    }
+    return clean;
+};
+
 export const employeeService = {
     getEmployees: async () => {
         try {
@@ -53,24 +64,27 @@ export const employeeService = {
 
     createEmployee: async (data) => {
         try {
-            const emailLower = data.email.toLowerCase();
-            // Check for duplicate email
-            const q = query(collection(db, COLLECTION_NAME), where("email", "==", emailLower));
-            const querySnap = await getDocs(q);
-            if (!querySnap.empty) {
-                throw new Error(`Employee with email "${data.email}" already exists.`);
+            const rawEmail = data.email ? data.email.trim().toLowerCase() : `emp_${Date.now()}@internal.local`;
+            
+            // Check for duplicate email if real email given
+            if (data.email) {
+                const q = query(collection(db, COLLECTION_NAME), where("email", "==", rawEmail));
+                const querySnap = await getDocs(q);
+                if (!querySnap.empty) {
+                    throw new Error(`Employee with email "${data.email}" already exists.`);
+                }
             }
 
             // Generate employeeId
-            const employeeId = await generateNextEmployeeId();
-            const fullName = `${data.firstName || ""} ${data.lastName || ""}`.trim();
+            const employeeId = data.employeeId || await generateNextEmployeeId();
+            const fullName = data.fullName ? data.fullName.trim() : `${data.firstName || ""} ${data.lastName || ""}`.trim();
             
-            // Create Firebase Auth user client-side using a secondary app instance
-            if (data.password) {
+            // Create Firebase Auth user client-side using a secondary app instance if password provided
+            if (data.password && data.email) {
                 const secondaryApp = initializeApp(firebaseConfig, `secondary_${Date.now()}`);
                 const secondaryAuth = getAuth(secondaryApp);
                 try {
-                    await createUserWithEmailAndPassword(secondaryAuth, emailLower, data.password);
+                    await createUserWithEmailAndPassword(secondaryAuth, rawEmail, data.password);
                     await signOut(secondaryAuth);
                 } catch (authError) {
                     console.error("Firebase Auth user creation failed:", authError);
@@ -81,21 +95,29 @@ export const employeeService = {
             // Omit password from document written to Firestore
             const { password, ...firestoreData } = data;
 
-            const docData = {
+            const docData = sanitizeData({
                 ...firestoreData,
-                email: emailLower,
+                email: rawEmail,
+                companyName: data.companyName || "",
                 employeeId,
-                fullName,
+                fullName: fullName || "Unnamed Employee",
                 role: data.role || "Employee",
+                status: data.status || "Active",
                 isFirstLogin: data.password ? true : false,
                 profilePicture: "",
                 createdAt: new Date().toISOString()
-            };
+            });
 
             const docRef = await addDoc(collection(db, COLLECTION_NAME), docData);
 
-            // Trigger Email notification
-            emailService.sendEmployeeCreated(docData);
+            // Trigger Email notification if email provided
+            if (data.email) {
+                try {
+                    emailService.sendEmployeeCreated(docData);
+                } catch (e) {
+                    console.warn("Could not send employee created email:", e);
+                }
+            }
 
             return { id: docRef.id, ...docData };
         } catch (error) {
@@ -124,12 +146,12 @@ export const employeeService = {
             }
 
             const fullName = `${data.firstName || oldValue.firstName} ${data.lastName || oldValue.lastName}`.trim();
-            const updateData = {
+            const updateData = sanitizeData({
                 ...data,
                 ...(data.email ? { email: data.email.toLowerCase() } : {}),
                 fullName,
                 updatedAt: new Date().toISOString()
-            };
+            });
 
             await updateDoc(docRef, updateData);
 

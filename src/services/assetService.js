@@ -20,6 +20,17 @@ const generateNextAssetNumber = async () => {
     return `AST-${nextNumber.toString().padStart(4, "0")}`;
 };
 
+const sanitizeData = (data) => {
+    if (!data || typeof data !== "object") return {};
+    const clean = {};
+    for (const [key, value] of Object.entries(data)) {
+        if (value !== undefined) {
+            clean[key] = value;
+        }
+    }
+    return clean;
+};
+
 export const assetService = {
     getAssets: async () => {
         try {
@@ -48,39 +59,64 @@ export const assetService = {
         }
     },
 
-    createAsset: async (data) => {
+    createAsset: async (data, performedBy = "Administrator") => {
         try {
-            const assetNumber = await generateNextAssetNumber();
+            const assetNumber = data.assetNumber || await generateNextAssetNumber();
             
-            // Barcode & QR Code values compile to the unique Asset Number
-            const docData = {
+            // Determine assignment status
+            const hasEmployee = Boolean(data.assignedEmployee || data.assignedEmployeeName);
+            let status = data.status || (hasEmployee ? "Assigned" : "Available");
+
+            const now = new Date().toISOString();
+            const logs = Array.isArray(data.logs) ? [...data.logs] : [];
+
+            // Initial creation log
+            logs.unshift({
+                id: `log-${Date.now()}-create`,
+                type: "CREATED",
+                title: "Asset Registered",
+                description: `Asset registered in system with status: ${status}.${data.serialNumber ? ` Serial No: ${data.serialNumber}.` : ""}`,
+                performedBy: performedBy || "Administrator",
+                timestamp: now
+            });
+
+            if (hasEmployee) {
+                const empName = data.assignedEmployeeName || "Employee";
+                const comp = data.companyName ? ` (${data.companyName})` : "";
+                logs.unshift({
+                    id: `log-${Date.now()}-assign`,
+                    type: "ASSIGNED",
+                    title: `Assigned to ${empName}`,
+                    description: `Assigned to ${empName}${comp} at site ${data.location || "General"}.`,
+                    performedBy: performedBy || "Administrator",
+                    timestamp: now
+                });
+            }
+
+            const docData = sanitizeData({
                 ...data,
                 assetNumber,
                 barcode: assetNumber,
                 qrCode: assetNumber,
-                createdAt: new Date().toISOString(),
-                assignedEmployee: data.assignedEmployee || ""
-            };
-
-            // Enforce status constraints based on assignment
-            if (docData.assignedEmployee) {
-                docData.status = "Assigned";
-            } else if (docData.status === "Assigned") {
-                docData.status = "Available"; // Fallback if no employee given
-            }
+                status,
+                companyName: data.companyName || "",
+                assignedEmployee: data.assignedEmployee || "",
+                assignedEmployeeName: data.assignedEmployeeName || "",
+                assignedEmployeeEmail: data.assignedEmployeeEmail || "",
+                serialNumber: data.serialNumber || "",
+                logs,
+                createdAt: now
+            });
 
             const docRef = await addDoc(collection(db, COLLECTION_NAME), docData);
             const savedAsset = { id: docRef.id, ...docData };
 
-
-
-            // If assigned, trigger email to employee
-            let empData = null;
+            // If assigned to a known employee ID, attempt email notification
             if (docData.assignedEmployee) {
                 try {
                     const empSnap = await getDoc(doc(db, "employees", docData.assignedEmployee));
                     if (empSnap.exists()) {
-                        empData = empSnap.data();
+                        const empData = empSnap.data();
                         await emailService.sendAssetAssigned(savedAsset, empData);
                     }
                 } catch (emailErr) {
@@ -88,9 +124,9 @@ export const assetService = {
                 }
             }
 
-            // Always send registration email to sanjeyasir@gmail.com
+            // Send registration email
             try {
-                await emailService.sendAssetCreatedNotification(savedAsset, empData, "sanjeyasir@gmail.com");
+                await emailService.sendAssetCreatedNotification(savedAsset, null, "sanjeyasir@gmail.com");
             } catch (emailErr) {
                 console.error("Failed to trigger asset creation notification:", emailErr);
             }
@@ -102,7 +138,7 @@ export const assetService = {
         }
     },
 
-    updateAsset: async (id, data) => {
+    updateAsset: async (id, data, performedBy = "Administrator") => {
         try {
             const docRef = doc(db, COLLECTION_NAME, id);
             const docSnap = await getDoc(docRef);
@@ -110,31 +146,88 @@ export const assetService = {
                 throw new Error("Asset not found");
             }
             const oldValue = docSnap.data();
+            const now = new Date().toISOString();
 
-            const updateData = {
-                ...data,
-                updatedAt: new Date().toISOString()
-            };
-
-            // Manage email triggers based on assignment change
             const oldEmployeeId = oldValue.assignedEmployee || "";
-            const newEmployeeId = updateData.assignedEmployee || "";
-            const oldStatus = oldValue.status;
-            const newStatus = updateData.status || oldStatus;
+            const newEmployeeId = data.assignedEmployee !== undefined ? data.assignedEmployee : oldEmployeeId;
+            const oldEmployeeName = oldValue.assignedEmployeeName || "";
+            const newEmployeeName = data.assignedEmployeeName !== undefined ? data.assignedEmployeeName : oldEmployeeName;
+            const oldStatus = oldValue.status || "Available";
+            const newStatus = data.status !== undefined ? data.status : oldStatus;
 
+            let adjustedStatus = newStatus;
             // Adjust status automatically if assigned employee field changed
             if (newEmployeeId && newEmployeeId !== oldEmployeeId) {
-                updateData.status = "Assigned";
-            } else if (!newEmployeeId && oldEmployeeId && newStatus === "Assigned") {
-                updateData.status = "Available"; // Revert status if unassigned
+                adjustedStatus = "Assigned";
+            } else if (!newEmployeeId && !newEmployeeName && (oldEmployeeId || oldEmployeeName) && adjustedStatus === "Assigned") {
+                adjustedStatus = "Available"; // Revert status if unassigned
             }
+
+            // Generate audit logs for differences
+            const existingLogs = Array.isArray(oldValue.logs) ? [...oldValue.logs] : [];
+            const newLogs = [];
+
+            // 1. Check Assignment Change
+            const assignmentChanged = (newEmployeeId !== oldEmployeeId) || (newEmployeeName && newEmployeeName !== oldEmployeeName);
+            if (assignmentChanged) {
+                if (newEmployeeName || newEmployeeId) {
+                    newLogs.push({
+                        id: `log-${Date.now()}-assign`,
+                        type: "ASSIGNED",
+                        title: `Assigned to ${newEmployeeName || "Employee"}`,
+                        description: `Custodian changed from "${oldEmployeeName || "Unassigned"}" to "${newEmployeeName || "Employee"}" (${data.companyName || oldValue.companyName || "Company"}).`,
+                        performedBy: performedBy || "Administrator",
+                        timestamp: now
+                    });
+                } else if (oldEmployeeName || oldEmployeeId) {
+                    newLogs.push({
+                        id: `log-${Date.now()}-unassign`,
+                        type: "UNASSIGNED",
+                        title: `Unassigned / Returned to Inventory`,
+                        description: `Asset returned from ${oldEmployeeName || "previous employee"}. Status set to ${adjustedStatus}.`,
+                        performedBy: performedBy || "Administrator",
+                        timestamp: now
+                    });
+                }
+            }
+
+            // 2. Check Status Change
+            if (adjustedStatus !== oldStatus) {
+                newLogs.push({
+                    id: `log-${Date.now()}-status`,
+                    type: "STATUS_CHANGE",
+                    title: `Status Changed to ${adjustedStatus}`,
+                    description: `Lifecycle state updated from "${oldStatus}" to "${adjustedStatus}".`,
+                    performedBy: performedBy || "Administrator",
+                    timestamp: now
+                });
+            }
+
+            // 3. Check General update if no assignment or status log added
+            if (newLogs.length === 0 && !data.logs) {
+                newLogs.push({
+                    id: `log-${Date.now()}-update`,
+                    type: "UPDATED",
+                    title: "Asset Specifications Updated",
+                    description: "Asset profile and hardware details updated.",
+                    performedBy: performedBy || "Administrator",
+                    timestamp: now
+                });
+            }
+
+            // Combine new logs at the beginning
+            const combinedLogs = data.logs ? data.logs : [...newLogs, ...existingLogs];
+
+            const updateData = sanitizeData({
+                ...data,
+                status: adjustedStatus,
+                logs: combinedLogs,
+                updatedAt: now
+            });
 
             await updateDoc(docRef, updateData);
             const mergedAsset = { ...oldValue, ...updateData };
 
-
-
-            // Handle Emails Triggering
             // 1. Assignment Email
             if (newEmployeeId && newEmployeeId !== oldEmployeeId) {
                 try {
@@ -166,6 +259,37 @@ export const assetService = {
         }
     },
 
+    addAssetLog: async (id, logEntry, performedBy = "Administrator") => {
+        try {
+            const docRef = doc(db, COLLECTION_NAME, id);
+            const docSnap = await getDoc(docRef);
+            if (!docSnap.exists()) {
+                throw new Error("Asset not found");
+            }
+            const current = docSnap.data();
+            const existingLogs = Array.isArray(current.logs) ? current.logs : [];
+            const newLog = {
+                id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                type: logEntry.type || "NOTE",
+                title: logEntry.title || "Maintenance Record",
+                description: logEntry.description || "",
+                performedBy: performedBy || "Administrator",
+                timestamp: new Date().toISOString()
+            };
+
+            const updatedLogs = [newLog, ...existingLogs];
+            await updateDoc(docRef, {
+                logs: updatedLogs,
+                updatedAt: new Date().toISOString()
+            });
+
+            return { id, ...current, logs: updatedLogs };
+        } catch (error) {
+            console.error("Error in addAssetLog:", error);
+            throw error;
+        }
+    },
+
     deleteAsset: async (id) => {
         try {
             const docRef = doc(db, COLLECTION_NAME, id);
@@ -175,14 +299,11 @@ export const assetService = {
             }
             const oldValue = docSnap.data();
 
-            if (oldValue.status === "Assigned" || oldValue.assignedEmployee) {
+            if (oldValue.status === "Assigned" && oldValue.assignedEmployee) {
                 throw new Error("Cannot delete asset. It is currently assigned to an employee. Unassign it first.");
             }
 
             await deleteDoc(docRef);
-
-
-
             return id;
         } catch (error) {
             console.error("Error in deleteAsset:", error);

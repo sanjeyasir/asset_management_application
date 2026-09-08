@@ -1,152 +1,334 @@
-import { useState, useEffect, useCallback } from "react";
-import { Box, Typography, Switch, FormControlLabel, Chip, IconButton, Tooltip, Alert, Divider } from "@mui/material";
-import { Edit, Delete, Add, Save, Close, Room } from "@mui/icons-material";
-import { useForm, Controller } from "react-hook-form";
-import { yupResolver } from "@hookform/resolvers/yup";
-import MasterPage from "../../components/layout/MasterPage";
-import AppDataGrid from "../../components/tables/AppDataGrid";
-import AppButton from "../../components/common/AppButton";
-import AppTextField from "../../components/common/AppTextField";
-import DeleteDialog from "../../components/dialogs/DeleteDialog";
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  Row,
+  Col,
+  Card,
+  Table,
+  Button,
+  Input,
+  Tag,
+  Space,
+  Modal,
+  Form,
+  Switch,
+  Tooltip,
+  Typography,
+  Alert,
+  Popconfirm
+} from "antd";
+import {
+  PlusOutlined,
+  SearchOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  EnvironmentOutlined,
+  FileExcelOutlined
+} from "@ant-design/icons";
 import { useNotification } from "../../contexts/NotificationContext";
 import locationService from "../../services/locationService";
-import { locationSchema } from "../../validators/schemas";
 
-const EMPTY_FORM = { name: "", active: true };
+const { Title, Text } = Typography;
 
-function Locations() {
-    const { showNotification } = useNotification();
-    const [rows, setRows] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [saving, setSaving] = useState(false);
-    const [editId, setEditId] = useState(null);
-    const [deleteTarget, setDeleteTarget] = useState(null);
-    const [deleting, setDeleting] = useState(false);
-    const [formError, setFormError] = useState("");
+export default function Locations() {
+  const { showNotification } = useNotification();
+  const [form] = Form.useForm();
 
-    const { control, handleSubmit, reset } = useForm({
-        resolver: yupResolver(locationSchema),
-        defaultValues: EMPTY_FORM
+  const [locations, setLocations] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [searchText, setSearchText] = useState("");
+
+  // Modal State
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingLoc, setEditingLoc] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await locationService.getLocations();
+      setLocations(data);
+    } catch {
+      showNotification("Failed to load locations.", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [showNotification]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleOpenCreate = () => {
+    setEditingLoc(null);
+    setFormError("");
+    form.resetFields();
+    form.setFieldsValue({ active: true });
+    setModalOpen(true);
+  };
+
+  const handleOpenEdit = (record) => {
+    setEditingLoc(record);
+    setFormError("");
+    form.resetFields();
+    form.setFieldsValue({
+      name: record.name,
+      active: record.active ?? true
     });
+    setModalOpen(true);
+  };
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            setRows(await locationService.getLocations());
-        } catch {
-            showNotification("Failed to load locations.", "error");
-        } finally {
-            setLoading(false);
-        }
-    }, [showNotification]);
+  const handleFormSubmit = async (values) => {
+    setSaving(true);
+    setFormError("");
+    try {
+      if (editingLoc) {
+        await locationService.updateLocation(editingLoc.id, values);
+        showNotification("Location updated successfully.", "success");
+      } else {
+        await locationService.createLocation(values);
+        showNotification("New location registered successfully.", "success");
+      }
+      setModalOpen(false);
+      loadData();
+    } catch (e) {
+      setFormError(e.message || "Failed to save location.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
-    useEffect(() => { load(); }, [load]);
+  const handleDelete = async (id, name) => {
+    try {
+      await locationService.deleteLocation(id);
+      showNotification(`Location "${name}" deleted.`, "success");
+      loadData();
+    } catch (e) {
+      showNotification(e.message || "Failed to delete location.", "error");
+    }
+  };
 
-    const handleRowClick = (params) => {
-        const r = params.row;
-        setEditId(r.id);
-        setFormError("");
-        reset({ name: r.name, active: r.active ?? true });
-    };
+  const handleExportCSV = () => {
+    if (filteredLocations.length === 0) return;
+    const headers = ["Location Name", "Status"];
+    const rows = filteredLocations.map((l) => [
+      `"${l.name || ""}"`,
+      `"${l.active ? "Active" : "Inactive"}"`
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `locations_export_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
-    const handleNew = () => { setEditId(null); setFormError(""); reset(EMPTY_FORM); };
+  const filteredLocations = locations.filter((l) => {
+    if (!searchText) return true;
+    return l.name?.toLowerCase().includes(searchText.toLowerCase());
+  });
 
-    const onSubmit = async (data) => {
-        setSaving(true);
-        setFormError("");
-        try {
-            if (editId) {
-                await locationService.updateLocation(editId, data);
-                showNotification("Location updated.", "success");
-            } else {
-                await locationService.createLocation(data);
-                showNotification("Location created.", "success");
-            }
-            handleNew();
-            load();
-        } catch (e) {
-            setFormError(e.message || "An error occurred.");
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const handleDeleteConfirm = async () => {
-        setDeleting(true);
-        try {
-            await locationService.deleteLocation(deleteTarget.id);
-            showNotification(`"${deleteTarget.name}" deleted.`, "success");
-            setDeleteTarget(null);
-            if (editId === deleteTarget.id) handleNew();
-            load();
-        } catch (e) {
-            showNotification(e.message || "Delete failed.", "error");
-        } finally {
-            setDeleting(false);
-        }
-    };
-
-    const columns = [
-        { field: "name", headerName: "Location Name", flex: 1.5, renderCell: (p) => (
-            <Box display="flex" alignItems="center" gap={1.5}>
-                <Box sx={{ p: 0.8, borderRadius: "8px", bgcolor: "rgba(236,72,153,0.1)", color: "#ec4899", display: "flex" }}>
-                    <Room fontSize="small" />
-                </Box>
-                <Typography variant="body2" fontWeight="600">{p.value}</Typography>
-            </Box>
-        )},
-        { field: "active", headerName: "Status", width: 100, renderCell: (p) => (
-            <Chip label={p.value ? "Active" : "Inactive"} size="small" color={p.value ? "success" : "default"} sx={{ fontWeight: 600 }} />
-        )},
-        { field: "actions", headerName: "", width: 90, sortable: false, renderCell: (p) => (
-            <Box display="flex">
-                <Tooltip title="Edit"><IconButton size="small" onClick={(e) => { e.stopPropagation(); handleRowClick({ row: p.row }); }}><Edit fontSize="small" /></IconButton></Tooltip>
-                <Tooltip title="Delete"><IconButton size="small" color="error" onClick={(e) => { e.stopPropagation(); setDeleteTarget(p.row); }}><Delete fontSize="small" /></IconButton></Tooltip>
-            </Box>
-        )},
-    ];
-
-    const formPanel = (
-        <Box component="form" onSubmit={handleSubmit(onSubmit)} noValidate>
-            <Box display="flex" justifyContent="space-between" alignItems="center" px={3} py={2} sx={{ borderBottom: "1px solid", borderColor: "divider" }}>
-                <Box>
-                    <Typography variant="h6" fontWeight="700">{editId ? "Edit Location" : "New Location"}</Typography>
-                    <Typography variant="caption" color="text.secondary">{editId ? "Update location details" : "Register a physical location"}</Typography>
-                </Box>
-                {editId && <Tooltip title="Clear"><IconButton size="small" onClick={handleNew}><Close fontSize="small" /></IconButton></Tooltip>}
-            </Box>
-            <Box px={3} py={3} display="flex" flexDirection="column" gap={2.5}>
-                {formError && <Alert severity="error" sx={{ borderRadius: 2 }}>{formError}</Alert>}
-                <AppTextField name="name" control={control} label="Location Name *" />
-                <Controller name="active" control={control} render={({ field }) => (
-                    <FormControlLabel control={<Switch checked={!!field.value} onChange={field.onChange} color="success" />}
-                        label={<Typography variant="body2" fontWeight="600">Active</Typography>} />
-                )} />
-            </Box>
-            <Divider />
-            <Box display="flex" gap={1.5} px={3} py={2} justifyContent="flex-end">
-                <AppButton variant="outlined" color="inherit" onClick={handleNew} disabled={saving}>Clear</AppButton>
-                <AppButton type="submit" loading={saving} startIcon={editId ? <Save /> : <Add />}>
-                    {editId ? "Update" : "Create Location"}
-                </AppButton>
-            </Box>
-        </Box>
-    );
-
-    return (
-        <>
-            <MasterPage
-                title="Locations"
-                subtitle="Manage physical asset locations"
-                breadcrumbs={[{ label: "Master Registry" }, { label: "Locations" }]}
-                action={<AppButton startIcon={<Add />} onClick={handleNew}>New Location</AppButton>}
-                gridPanel={<AppDataGrid rows={rows} columns={columns} loading={loading} onRowClick={handleRowClick} exportFileName="locations.csv" placeholder="Search locations..." />}
-                formPanel={formPanel}
+  const columns = [
+    {
+      title: "Location / Site Name",
+      dataIndex: "name",
+      key: "name",
+      render: (text) => (
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              padding: "8px",
+              borderRadius: 8,
+              background: "rgba(236, 72, 153, 0.08)",
+              color: "#ec4899",
+              display: "flex"
+            }}
+          >
+            <EnvironmentOutlined style={{ fontSize: 18 }} />
+          </div>
+          <span style={{ fontWeight: 700, color: "#0f172a", fontSize: "0.92rem" }}>
+            {text}
+          </span>
+        </div>
+      )
+    },
+    {
+      title: "Status",
+      dataIndex: "active",
+      key: "active",
+      render: (active) => (
+        <Tag color={active ? "success" : "default"} style={{ fontWeight: 600 }}>
+          {active ? "Active" : "Inactive"}
+        </Tag>
+      )
+    },
+    {
+      title: "Actions",
+      key: "actions",
+      align: "right",
+      render: (_, record) => (
+        <Space size="small">
+          <Tooltip title="Edit Location">
+            <Button
+              type="text"
+              icon={<EditOutlined style={{ color: "#10b981", fontSize: 16 }} />}
+              onClick={() => handleOpenEdit(record)}
             />
-            <DeleteDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm}
-                loading={deleting} message={`Delete "${deleteTarget?.name}"? This cannot be undone.`} />
-        </>
-    );
-}
+          </Tooltip>
+          <Tooltip title="Delete Location">
+            <Popconfirm
+              title="Delete Location"
+              description={`Delete "${record.name}"? This action cannot be undone.`}
+              onConfirm={() => handleDelete(record.id, record.name)}
+              okText="Delete"
+              cancelText="Cancel"
+              okButtonProps={{ danger: true }}
+            >
+              <Button type="text" danger icon={<DeleteOutlined style={{ fontSize: 16 }} />} />
+            </Popconfirm>
+          </Tooltip>
+        </Space>
+      )
+    }
+  ];
 
-export default Locations;
+  return (
+    <div style={{ paddingBottom: 24 }}>
+      {/* Page Header */}
+      <Row justify="space-between" align="middle" style={{ marginBottom: 24 }}>
+        <Col>
+          <Title level={2} style={{ margin: 0, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>
+            Locations & Sites
+          </Title>
+          <Text type="secondary" style={{ fontSize: "0.92rem" }}>
+            Manage physical office branches, warehouses, server rooms, and operational facilities.
+          </Text>
+        </Col>
+        <Col>
+          <Space>
+            <Button
+              icon={<FileExcelOutlined />}
+              onClick={handleExportCSV}
+              style={{ borderRadius: 8, fontWeight: 600 }}
+            >
+              Export CSV
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={handleOpenCreate}
+              size="large"
+              style={{
+                borderRadius: 8,
+                background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                border: "none",
+                fontWeight: 700,
+                boxShadow: "0 4px 12px rgba(99, 102, 241, 0.25)"
+              }}
+            >
+              New Location
+            </Button>
+          </Space>
+        </Col>
+      </Row>
+
+      {/* Filter Bar */}
+      <Card
+        bordered
+        style={{ marginBottom: 20, borderRadius: 14, border: "1px solid #e2e8f0" }}
+        styles={{ body: { padding: "16px 20px" } }}
+      >
+        <Row gutter={[16, 16]} align="middle">
+          <Col xs={24} sm={12} md={8}>
+            <Input
+              prefix={<SearchOutlined style={{ color: "#94a3b8" }} />}
+              placeholder="Search locations..."
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              allowClear
+              style={{ borderRadius: 8 }}
+            />
+          </Col>
+        </Row>
+      </Card>
+
+      {/* Table Card */}
+      <Card
+        bordered
+        style={{ borderRadius: 16, border: "1px solid #e2e8f0" }}
+        styles={{ body: { padding: 0 } }}
+      >
+        <Table
+          dataSource={filteredLocations}
+          columns={columns}
+          rowKey="id"
+          loading={loading}
+          pagination={{ pageSize: 10 }}
+        />
+      </Card>
+
+      {/* Create / Edit Modal */}
+      <Modal
+        title={
+          <span style={{ fontWeight: 700, fontSize: "1.1rem", color: "#0f172a" }}>
+            {editingLoc ? "Edit Location" : "Add New Location"}
+          </span>
+        }
+        open={modalOpen}
+        onCancel={() => setModalOpen(false)}
+        footer={null}
+        width={460}
+        centered
+        styles={{ content: { borderRadius: 16, background: "#ffffff" } }}
+      >
+        {formError && <Alert message={formError} type="error" showIcon style={{ marginBottom: 16, borderRadius: 8 }} />}
+
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleFormSubmit}
+          requiredMark={true}
+          style={{ marginTop: 16 }}
+        >
+          <Form.Item
+            name="name"
+            label={<span style={{ color: "#475569", fontWeight: 600 }}>Location Name</span>}
+            rules={[{ required: true, message: "Location Name is required." }]}
+          >
+            <Input placeholder="e.g. Headquarters - Floor 3" size="large" style={{ borderRadius: 8 }} />
+          </Form.Item>
+
+          <Form.Item
+            name="active"
+            valuePropName="checked"
+            label={<span style={{ color: "#475569", fontWeight: 600 }}>Active Status</span>}
+          >
+            <Switch checkedChildren="Active" unCheckedChildren="Inactive" />
+          </Form.Item>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 16 }}>
+            <Button onClick={() => setModalOpen(false)} style={{ borderRadius: 8 }} disabled={saving}>
+              Cancel
+            </Button>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={saving}
+              style={{
+                borderRadius: 8,
+                fontWeight: 700,
+                background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                border: "none",
+                boxShadow: "0 4px 12px rgba(99, 102, 241, 0.25)"
+              }}
+            >
+              {editingLoc ? "Save Changes" : "Create Location"}
+            </Button>
+          </div>
+        </Form>
+      </Modal>
+    </div>
+  );
+}

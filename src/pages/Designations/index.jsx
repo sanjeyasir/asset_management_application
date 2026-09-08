@@ -1,156 +1,355 @@
-import { useState, useEffect, useCallback } from "react";
-import { Box, Typography, Switch, FormControlLabel, Chip, IconButton, Tooltip, Alert, Divider } from "@mui/material";
-import { Edit, Delete, Add, Save, Close, WorkspacePremium } from "@mui/icons-material";
-import { useForm, Controller } from "react-hook-form";
-import { yupResolver } from "@hookform/resolvers/yup";
-import MasterPage from "../../components/layout/MasterPage";
-import AppDataGrid from "../../components/tables/AppDataGrid";
-import AppButton from "../../components/common/AppButton";
-import AppTextField from "../../components/common/AppTextField";
-import DeleteDialog from "../../components/dialogs/DeleteDialog";
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  Row,
+  Col,
+  Card,
+  Table,
+  Button,
+  Input,
+  Tag,
+  Space,
+  Modal,
+  Form,
+  Switch,
+  Tooltip,
+  Typography,
+  Alert,
+  Popconfirm
+} from "antd";
+import {
+  PlusOutlined,
+  SearchOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  IdcardOutlined,
+  FileExcelOutlined
+} from "@ant-design/icons";
 import { useNotification } from "../../contexts/NotificationContext";
 import designationService from "../../services/designationService";
-import { designationSchema } from "../../validators/schemas";
 
-const EMPTY_FORM = { name: "", description: "", active: true };
+const { Title, Text } = Typography;
+const { TextArea } = Input;
 
-function Designations() {
-    const { showNotification } = useNotification();
-    const [rows, setRows] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [saving, setSaving] = useState(false);
-    const [editId, setEditId] = useState(null);
-    const [deleteTarget, setDeleteTarget] = useState(null);
-    const [deleting, setDeleting] = useState(false);
-    const [formError, setFormError] = useState("");
+export default function Designations() {
+  const { showNotification } = useNotification();
+  const [form] = Form.useForm();
 
-    const { control, handleSubmit, reset, formState: { errors } } = useForm({
-        resolver: yupResolver(designationSchema),
-        defaultValues: EMPTY_FORM
+  const [designations, setDesignations] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [searchText, setSearchText] = useState("");
+
+  // Modal State
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingDesig, setEditingDesig] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await designationService.getDesignations();
+      setDesignations(data);
+    } catch {
+      showNotification("Failed to load designations.", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [showNotification]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleOpenCreate = () => {
+    setEditingDesig(null);
+    setFormError("");
+    form.resetFields();
+    form.setFieldsValue({ active: true });
+    setModalOpen(true);
+  };
+
+  const handleOpenEdit = (record) => {
+    setEditingDesig(record);
+    setFormError("");
+    form.resetFields();
+    form.setFieldsValue({
+      name: record.name,
+      description: record.description || "",
+      active: record.active ?? true
     });
+    setModalOpen(true);
+  };
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            setRows(await designationService.getDesignations());
-        } catch {
-            showNotification("Failed to load designations.", "error");
-        } finally {
-            setLoading(false);
-        }
-    }, [showNotification]);
+  const handleFormSubmit = async (values) => {
+    setSaving(true);
+    setFormError("");
+    try {
+      if (editingDesig) {
+        await designationService.updateDesignation(editingDesig.id, values);
+        showNotification("Designation updated successfully.", "success");
+      } else {
+        await designationService.createDesignation(values);
+        showNotification("New designation registered successfully.", "success");
+      }
+      setModalOpen(false);
+      loadData();
+    } catch (e) {
+      setFormError(e.message || "Failed to save designation.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
-    useEffect(() => { load(); }, [load]);
+  const handleDelete = async (id, name) => {
+    try {
+      await designationService.deleteDesignation(id);
+      showNotification(`Designation "${name}" deleted.`, "success");
+      loadData();
+    } catch (e) {
+      showNotification(e.message || "Failed to delete designation.", "error");
+    }
+  };
 
-    const handleRowClick = (params) => {
-        const r = params.row;
-        setEditId(r.id);
-        setFormError("");
-        reset({ name: r.name, description: r.description || "", active: r.active ?? true });
-    };
+  const handleExportCSV = () => {
+    if (filteredDesignations.length === 0) return;
+    const headers = ["Designation Name", "Description", "Status"];
+    const rows = filteredDesignations.map((d) => [
+      `"${d.name || ""}"`,
+      `"${d.description || ""}"`,
+      `"${d.active ? "Active" : "Inactive"}"`
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `designations_export_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
-    const handleNew = () => { setEditId(null); setFormError(""); reset(EMPTY_FORM); };
+  const filteredDesignations = designations.filter((d) => {
+    if (!searchText) return true;
+    const search = searchText.toLowerCase();
+    return d.name?.toLowerCase().includes(search) || d.description?.toLowerCase().includes(search);
+  });
 
-    const onSubmit = async (data) => {
-        setSaving(true);
-        setFormError("");
-        try {
-            if (editId) {
-                await designationService.updateDesignation(editId, data);
-                showNotification("Designation updated.", "success");
-            } else {
-                await designationService.createDesignation(data);
-                showNotification("Designation created.", "success");
-            }
-            handleNew();
-            load();
-        } catch (e) {
-            setFormError(e.message || "An error occurred.");
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const handleDeleteConfirm = async () => {
-        setDeleting(true);
-        try {
-            await designationService.deleteDesignation(deleteTarget.id);
-            showNotification(`"${deleteTarget.name}" deleted.`, "success");
-            setDeleteTarget(null);
-            if (editId === deleteTarget.id) handleNew();
-            load();
-        } catch (e) {
-            showNotification(e.message || "Delete failed.", "error");
-        } finally {
-            setDeleting(false);
-        }
-    };
-
-    const columns = [
-        { field: "name", headerName: "Designation", flex: 1.5, renderCell: (p) => (
-            <Box display="flex" alignItems="center" gap={1.5}>
-                <Box sx={{ p: 0.8, borderRadius: "8px", bgcolor: "rgba(6,182,212,0.1)", color: "secondary.main", display: "flex" }}>
-                    <WorkspacePremium fontSize="small" />
-                </Box>
-                <Typography variant="body2" fontWeight="600">{p.value}</Typography>
-            </Box>
-        )},
-        { field: "description", headerName: "Description", flex: 2, renderCell: (p) => (
-            <Typography variant="caption" color="text.secondary">{p.value || "—"}</Typography>
-        )},
-        { field: "active", headerName: "Status", width: 100, renderCell: (p) => (
-            <Chip label={p.value ? "Active" : "Inactive"} size="small" color={p.value ? "success" : "default"} sx={{ fontWeight: 600 }} />
-        )},
-        { field: "actions", headerName: "", width: 90, sortable: false, renderCell: (p) => (
-            <Box display="flex">
-                <Tooltip title="Edit"><IconButton size="small" onClick={(e) => { e.stopPropagation(); handleRowClick({ row: p.row }); }}><Edit fontSize="small" /></IconButton></Tooltip>
-                <Tooltip title="Delete"><IconButton size="small" color="error" onClick={(e) => { e.stopPropagation(); setDeleteTarget(p.row); }}><Delete fontSize="small" /></IconButton></Tooltip>
-            </Box>
-        )},
-    ];
-
-    const formPanel = (
-        <Box component="form" onSubmit={handleSubmit(onSubmit)} noValidate>
-            <Box display="flex" justifyContent="space-between" alignItems="center" px={3} py={2} sx={{ borderBottom: "1px solid", borderColor: "divider" }}>
-                <Box>
-                    <Typography variant="h6" fontWeight="700">{editId ? "Edit Designation" : "New Designation"}</Typography>
-                    <Typography variant="caption" color="text.secondary">{editId ? "Update designation details" : "Create a new job designation"}</Typography>
-                </Box>
-                {editId && <Tooltip title="Clear"><IconButton size="small" onClick={handleNew}><Close fontSize="small" /></IconButton></Tooltip>}
-            </Box>
-            <Box px={3} py={3} display="flex" flexDirection="column" gap={2.5}>
-                {formError && <Alert severity="error" sx={{ borderRadius: 2 }}>{formError}</Alert>}
-                <AppTextField name="name" control={control} label="Designation Name *" />
-                <AppTextField name="description" control={control} label="Description" multiline rows={3} />
-                <Controller name="active" control={control} render={({ field }) => (
-                    <FormControlLabel control={<Switch checked={!!field.value} onChange={field.onChange} color="success" />}
-                        label={<Typography variant="body2" fontWeight="600">Active</Typography>} />
-                )} />
-            </Box>
-            <Divider />
-            <Box display="flex" gap={1.5} px={3} py={2} justifyContent="flex-end">
-                <AppButton variant="outlined" color="inherit" onClick={handleNew} disabled={saving}>Clear</AppButton>
-                <AppButton type="submit" loading={saving} startIcon={editId ? <Save /> : <Add />}>
-                    {editId ? "Update" : "Create Designation"}
-                </AppButton>
-            </Box>
-        </Box>
-    );
-
-    return (
-        <>
-            <MasterPage
-                title="Designations"
-                subtitle="Manage job titles and roles"
-                breadcrumbs={[{ label: "Master Registry" }, { label: "Designations" }]}
-                action={<AppButton startIcon={<Add />} onClick={handleNew}>New Designation</AppButton>}
-                gridPanel={<AppDataGrid rows={rows} columns={columns} loading={loading} onRowClick={handleRowClick} exportFileName="designations.csv" placeholder="Search designations..." />}
-                formPanel={formPanel}
+  const columns = [
+    {
+      title: "Designation Name",
+      dataIndex: "name",
+      key: "name",
+      render: (text) => (
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              padding: "8px",
+              borderRadius: 8,
+              background: "rgba(6, 182, 212, 0.08)",
+              color: "#06b6d4",
+              display: "flex"
+            }}
+          >
+            <IdcardOutlined style={{ fontSize: 18 }} />
+          </div>
+          <span style={{ fontWeight: 700, color: "#0f172a", fontSize: "0.92rem" }}>
+            {text}
+          </span>
+        </div>
+      )
+    },
+    {
+      title: "Description",
+      dataIndex: "description",
+      key: "description",
+      render: (desc) => (
+        <span style={{ color: "#64748b", fontSize: "0.85rem" }}>
+          {desc || "—"}
+        </span>
+      )
+    },
+    {
+      title: "Status",
+      dataIndex: "active",
+      key: "active",
+      render: (active) => (
+        <Tag color={active ? "success" : "default"} style={{ fontWeight: 600 }}>
+          {active ? "Active" : "Inactive"}
+        </Tag>
+      )
+    },
+    {
+      title: "Actions",
+      key: "actions",
+      align: "right",
+      render: (_, record) => (
+        <Space size="small">
+          <Tooltip title="Edit Designation">
+            <Button
+              type="text"
+              icon={<EditOutlined style={{ color: "#10b981", fontSize: 16 }} />}
+              onClick={() => handleOpenEdit(record)}
             />
-            <DeleteDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm}
-                loading={deleting} message={`Delete "${deleteTarget?.name}"? This cannot be undone.`} />
-        </>
-    );
-}
+          </Tooltip>
+          <Tooltip title="Delete Designation">
+            <Popconfirm
+              title="Delete Designation"
+              description={`Delete "${record.name}"? This action cannot be undone.`}
+              onConfirm={() => handleDelete(record.id, record.name)}
+              okText="Delete"
+              cancelText="Cancel"
+              okButtonProps={{ danger: true }}
+            >
+              <Button type="text" danger icon={<DeleteOutlined style={{ fontSize: 16 }} />} />
+            </Popconfirm>
+          </Tooltip>
+        </Space>
+      )
+    }
+  ];
 
-export default Designations;
+  return (
+    <div style={{ paddingBottom: 24 }}>
+      {/* Page Header */}
+      <Row justify="space-between" align="middle" style={{ marginBottom: 24 }}>
+        <Col>
+          <Title level={2} style={{ margin: 0, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>
+            Designations
+          </Title>
+          <Text type="secondary" style={{ fontSize: "0.92rem" }}>
+            Configure corporate job titles, position grades, and employee job roles.
+          </Text>
+        </Col>
+        <Col>
+          <Space>
+            <Button
+              icon={<FileExcelOutlined />}
+              onClick={handleExportCSV}
+              style={{ borderRadius: 8, fontWeight: 600 }}
+            >
+              Export CSV
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={handleOpenCreate}
+              size="large"
+              style={{
+                borderRadius: 8,
+                background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                border: "none",
+                fontWeight: 700,
+                boxShadow: "0 4px 12px rgba(99, 102, 241, 0.25)"
+              }}
+            >
+              New Designation
+            </Button>
+          </Space>
+        </Col>
+      </Row>
+
+      {/* Filter and Search Bar */}
+      <Card
+        bordered
+        style={{ marginBottom: 20, borderRadius: 14, border: "1px solid #e2e8f0" }}
+        styles={{ body: { padding: "16px 20px" } }}
+      >
+        <Row gutter={[16, 16]} align="middle">
+          <Col xs={24} sm={12} md={8}>
+            <Input
+              prefix={<SearchOutlined style={{ color: "#94a3b8" }} />}
+              placeholder="Search designations..."
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              allowClear
+              style={{ borderRadius: 8 }}
+            />
+          </Col>
+        </Row>
+      </Card>
+
+      {/* Table Card */}
+      <Card
+        bordered
+        style={{ borderRadius: 16, border: "1px solid #e2e8f0" }}
+        styles={{ body: { padding: 0 } }}
+      >
+        <Table
+          dataSource={filteredDesignations}
+          columns={columns}
+          rowKey="id"
+          loading={loading}
+          pagination={{ pageSize: 10 }}
+        />
+      </Card>
+
+      {/* Create / Edit Modal */}
+      <Modal
+        title={
+          <span style={{ fontWeight: 700, fontSize: "1.1rem", color: "#0f172a" }}>
+            {editingDesig ? "Edit Designation" : "Add New Designation"}
+          </span>
+        }
+        open={modalOpen}
+        onCancel={() => setModalOpen(false)}
+        footer={null}
+        width={480}
+        centered
+        styles={{ content: { borderRadius: 16, background: "#ffffff" } }}
+      >
+        {formError && <Alert message={formError} type="error" showIcon style={{ marginBottom: 16, borderRadius: 8 }} />}
+
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleFormSubmit}
+          requiredMark={true}
+          style={{ marginTop: 16 }}
+        >
+          <Form.Item
+            name="name"
+            label={<span style={{ color: "#475569", fontWeight: 600 }}>Designation Title</span>}
+            rules={[{ required: true, message: "Designation Title is required." }]}
+          >
+            <Input placeholder="e.g. Senior Software Engineer" size="large" style={{ borderRadius: 8 }} />
+          </Form.Item>
+
+          <Form.Item
+            name="description"
+            label={<span style={{ color: "#475569", fontWeight: 600 }}>Role Summary</span>}
+          >
+            <TextArea placeholder="Key responsibilities and grade summary" rows={3} style={{ borderRadius: 8 }} />
+          </Form.Item>
+
+          <Form.Item
+            name="active"
+            valuePropName="checked"
+            label={<span style={{ color: "#475569", fontWeight: 600 }}>Active Status</span>}
+          >
+            <Switch checkedChildren="Active" unCheckedChildren="Inactive" />
+          </Form.Item>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 16 }}>
+            <Button onClick={() => setModalOpen(false)} style={{ borderRadius: 8 }} disabled={saving}>
+              Cancel
+            </Button>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={saving}
+              style={{
+                borderRadius: 8,
+                fontWeight: 700,
+                background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                border: "none",
+                boxShadow: "0 4px 12px rgba(99, 102, 241, 0.25)"
+              }}
+            >
+              {editingDesig ? "Save Changes" : "Create Designation"}
+            </Button>
+          </div>
+        </Form>
+      </Modal>
+    </div>
+  );
+}

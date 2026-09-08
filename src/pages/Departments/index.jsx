@@ -1,229 +1,379 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
-    Box, Typography, Switch, FormControlLabel, Chip,
-    IconButton, Tooltip, Alert, Divider
-} from "@mui/material";
-import { Edit, Delete, Add, Save, Close, Business } from "@mui/icons-material";
-import { useForm, Controller } from "react-hook-form";
-import { yupResolver } from "@hookform/resolvers/yup";
-import MasterPage from "../../components/layout/MasterPage";
-import AppDataGrid from "../../components/tables/AppDataGrid";
-import AppButton from "../../components/common/AppButton";
-import AppTextField from "../../components/common/AppTextField";
-import DeleteDialog from "../../components/dialogs/DeleteDialog";
+  Row,
+  Col,
+  Card,
+  Table,
+  Button,
+  Input,
+  Tag,
+  Space,
+  Modal,
+  Form,
+  Switch,
+  Tooltip,
+  Typography,
+  Alert,
+  Popconfirm
+} from "antd";
+import {
+  PlusOutlined,
+  SearchOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  ApartmentOutlined,
+  FileExcelOutlined
+} from "@ant-design/icons";
 import { useNotification } from "../../contexts/NotificationContext";
 import departmentService from "../../services/departmentService";
-import { departmentSchema } from "../../validators/schemas";
 
-const EMPTY_FORM = { name: "", code: "", description: "", active: true };
+const { Title, Text } = Typography;
+const { TextArea } = Input;
 
-function Departments() {
-    const { showNotification } = useNotification();
-    const [rows, setRows] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [saving, setSaving] = useState(false);
-    const [editId, setEditId] = useState(null); // null = create mode
-    const [deleteTarget, setDeleteTarget] = useState(null);
-    const [deleting, setDeleting] = useState(false);
-    const [formError, setFormError] = useState("");
+export default function Departments() {
+  const { showNotification } = useNotification();
+  const [form] = Form.useForm();
 
-    const { control, handleSubmit, reset, setValue, watch, formState: { errors, isDirty } } = useForm({
-        resolver: yupResolver(departmentSchema),
-        defaultValues: EMPTY_FORM
+  const [departments, setDepartments] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [searchText, setSearchText] = useState("");
+
+  // Modal State
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingDept, setEditingDept] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await departmentService.getDepartments();
+      setDepartments(data);
+    } catch {
+      showNotification("Failed to load departments.", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [showNotification]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleOpenCreate = () => {
+    setEditingDept(null);
+    setFormError("");
+    form.resetFields();
+    form.setFieldsValue({ active: true });
+    setModalOpen(true);
+  };
+
+  const handleOpenEdit = (record) => {
+    setEditingDept(record);
+    setFormError("");
+    form.resetFields();
+    form.setFieldsValue({
+      name: record.name,
+      code: record.code,
+      description: record.description || "",
+      active: record.active ?? true
     });
+    setModalOpen(true);
+  };
 
-    const activeValue = watch("active");
+  const handleFormSubmit = async (values) => {
+    setSaving(true);
+    setFormError("");
+    try {
+      const payload = {
+        ...values,
+        code: values.code ? values.code.toUpperCase() : ""
+      };
+      if (editingDept) {
+        await departmentService.updateDepartment(editingDept.id, payload);
+        showNotification("Department updated successfully.", "success");
+      } else {
+        await departmentService.createDepartment(payload);
+        showNotification("New department registered successfully.", "success");
+      }
+      setModalOpen(false);
+      loadData();
+    } catch (e) {
+      setFormError(e.message || "Failed to save department.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const data = await departmentService.getDepartments();
-            setRows(data);
-        } catch (e) {
-            showNotification("Failed to load departments.", "error");
-        } finally {
-            setLoading(false);
-        }
-    }, [showNotification]);
+  const handleDelete = async (id, name) => {
+    try {
+      await departmentService.deleteDepartment(id);
+      showNotification(`Department "${name}" deleted.`, "success");
+      loadData();
+    } catch (e) {
+      showNotification(e.message || "Failed to delete department.", "error");
+    }
+  };
 
-    useEffect(() => { load(); }, [load]);
+  const handleExportCSV = () => {
+    if (filteredDepartments.length === 0) return;
+    const headers = ["Department Name", "Code", "Description", "Status"];
+    const rows = filteredDepartments.map((d) => [
+      `"${d.name || ""}"`,
+      `"${d.code || ""}"`,
+      `"${d.description || ""}"`,
+      `"${d.active ? "Active" : "Inactive"}"`
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `departments_export_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
-    const handleRowClick = (params) => {
-        const row = params.row;
-        setEditId(row.id);
-        setFormError("");
-        reset({ name: row.name, code: row.code, description: row.description || "", active: row.active ?? true });
-    };
+  const filteredDepartments = departments.filter((d) => {
+    if (!searchText) return true;
+    const search = searchText.toLowerCase();
+    return d.name?.toLowerCase().includes(search) || d.code?.toLowerCase().includes(search) || d.description?.toLowerCase().includes(search);
+  });
 
-    const handleNew = () => {
-        setEditId(null);
-        setFormError("");
-        reset(EMPTY_FORM);
-    };
+  const columns = [
+    {
+      title: "Department Name",
+      dataIndex: "name",
+      key: "name",
+      render: (text) => (
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              padding: "8px",
+              borderRadius: 8,
+              background: "rgba(139, 92, 246, 0.08)",
+              color: "#8b5cf6",
+              display: "flex"
+            }}
+          >
+            <ApartmentOutlined style={{ fontSize: 18 }} />
+          </div>
+          <span style={{ fontWeight: 700, color: "#0f172a", fontSize: "0.92rem" }}>
+            {text}
+          </span>
+        </div>
+      )
+    },
+    {
+      title: "Code",
+      dataIndex: "code",
+      key: "code",
+      render: (code) => (
+        <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#6366f1", background: "rgba(99, 102, 241, 0.08)", padding: "3px 8px", borderRadius: 6 }}>
+          {code || "—"}
+        </span>
+      )
+    },
+    {
+      title: "Description",
+      dataIndex: "description",
+      key: "description",
+      render: (desc) => (
+        <span style={{ color: "#64748b", fontSize: "0.85rem" }}>
+          {desc || "—"}
+        </span>
+      )
+    },
+    {
+      title: "Status",
+      dataIndex: "active",
+      key: "active",
+      render: (active) => (
+        <Tag color={active ? "success" : "default"} style={{ fontWeight: 600 }}>
+          {active ? "Active" : "Inactive"}
+        </Tag>
+      )
+    },
+    {
+      title: "Actions",
+      key: "actions",
+      align: "right",
+      render: (_, record) => (
+        <Space size="small">
+          <Tooltip title="Edit Department">
+            <Button
+              type="text"
+              icon={<EditOutlined style={{ color: "#10b981", fontSize: 16 }} />}
+              onClick={() => handleOpenEdit(record)}
+            />
+          </Tooltip>
+          <Tooltip title="Delete Department">
+            <Popconfirm
+              title="Delete Department"
+              description={`Delete "${record.name}"? This action cannot be undone.`}
+              onConfirm={() => handleDelete(record.id, record.name)}
+              okText="Delete"
+              cancelText="Cancel"
+              okButtonProps={{ danger: true }}
+            >
+              <Button type="text" danger icon={<DeleteOutlined style={{ fontSize: 16 }} />} />
+            </Popconfirm>
+          </Tooltip>
+        </Space>
+      )
+    }
+  ];
 
-    const onSubmit = async (data) => {
-        setSaving(true);
-        setFormError("");
-        try {
-            if (editId) {
-                await departmentService.updateDepartment(editId, data);
-                showNotification("Department updated successfully.", "success");
-            } else {
-                await departmentService.createDepartment(data);
-                showNotification("Department created successfully.", "success");
-            }
-            handleNew();
-            load();
-        } catch (e) {
-            setFormError(e.message || "An error occurred.");
-        } finally {
-            setSaving(false);
-        }
-    };
+  return (
+    <div style={{ paddingBottom: 24 }}>
+      {/* Page Header */}
+      <Row justify="space-between" align="middle" style={{ marginBottom: 24 }}>
+        <Col>
+          <Title level={2} style={{ margin: 0, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>
+            Departments
+          </Title>
+          <Text type="secondary" style={{ fontSize: "0.92rem" }}>
+            Manage corporate organizational units, divisions, and asset ownership branches.
+          </Text>
+        </Col>
+        <Col>
+          <Space>
+            <Button
+              icon={<FileExcelOutlined />}
+              onClick={handleExportCSV}
+              style={{ borderRadius: 8, fontWeight: 600 }}
+            >
+              Export CSV
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={handleOpenCreate}
+              size="large"
+              style={{
+                borderRadius: 8,
+                background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                border: "none",
+                fontWeight: 700,
+                boxShadow: "0 4px 12px rgba(99, 102, 241, 0.25)"
+              }}
+            >
+              New Department
+            </Button>
+          </Space>
+        </Col>
+      </Row>
 
-    const handleDeleteConfirm = async () => {
-        if (!deleteTarget) return;
-        setDeleting(true);
-        try {
-            await departmentService.deleteDepartment(deleteTarget.id);
-            showNotification(`"${deleteTarget.name}" deleted successfully.`, "success");
-            setDeleteTarget(null);
-            if (editId === deleteTarget.id) handleNew();
-            load();
-        } catch (e) {
-            showNotification(e.message || "Delete failed.", "error");
-        } finally {
-            setDeleting(false);
-        }
-    };
+      {/* Filter and Search Bar */}
+      <Card
+        bordered
+        style={{ marginBottom: 20, borderRadius: 14, border: "1px solid #e2e8f0" }}
+        styles={{ body: { padding: "16px 20px" } }}
+      >
+        <Row gutter={[16, 16]} align="middle">
+          <Col xs={24} sm={12} md={8}>
+            <Input
+              prefix={<SearchOutlined style={{ color: "#94a3b8" }} />}
+              placeholder="Search departments by name or code..."
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              allowClear
+              style={{ borderRadius: 8 }}
+            />
+          </Col>
+        </Row>
+      </Card>
 
-    const columns = [
-        { field: "name", headerName: "Department Name", flex: 1.5, renderCell: (p) => (
-            <Box display="flex" alignItems="center" gap={1.5}>
-                <Box sx={{ p: 0.8, borderRadius: "8px", bgcolor: "rgba(99,102,241,0.1)", color: "primary.main", display: "flex" }}>
-                    <Business fontSize="small" />
-                </Box>
-                <Typography variant="body2" fontWeight="600">{p.value}</Typography>
-            </Box>
-        )},
-        { field: "code", headerName: "Code", width: 100, renderCell: (p) => (
-            <Chip label={p.value} size="small" variant="outlined" sx={{ fontWeight: 700, fontFamily: "monospace" }} />
-        )},
-        { field: "description", headerName: "Description", flex: 1.5, renderCell: (p) => (
-            <Typography variant="caption" color="text.secondary">{p.value || "—"}</Typography>
-        )},
-        { field: "active", headerName: "Status", width: 100, renderCell: (p) => (
-            <Chip label={p.value ? "Active" : "Inactive"} size="small"
-                color={p.value ? "success" : "default"} variant="filled" sx={{ fontWeight: 600 }} />
-        )},
-        { field: "actions", headerName: "", width: 90, sortable: false,
-            renderCell: (p) => (
-                <Box display="flex">
-                    <Tooltip title="Edit">
-                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleRowClick({ row: p.row }); }}>
-                            <Edit fontSize="small" />
-                        </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Delete">
-                        <IconButton size="small" color="error" onClick={(e) => { e.stopPropagation(); setDeleteTarget(p.row); }}>
-                            <Delete fontSize="small" />
-                        </IconButton>
-                    </Tooltip>
-                </Box>
-            )
-        },
-    ];
-
-    const gridPanel = (
-        <AppDataGrid
-            rows={rows}
-            columns={columns}
-            loading={loading}
-            onRowClick={handleRowClick}
-            exportFileName="departments.csv"
-            placeholder="Search departments..."
+      {/* Table Card */}
+      <Card
+        bordered
+        style={{ borderRadius: 16, border: "1px solid #e2e8f0" }}
+        styles={{ body: { padding: 0 } }}
+      >
+        <Table
+          dataSource={filteredDepartments}
+          columns={columns}
+          rowKey="id"
+          loading={loading}
+          pagination={{ pageSize: 10 }}
         />
-    );
+      </Card>
 
-    const formPanel = (
-        <Box component="form" onSubmit={handleSubmit(onSubmit)} noValidate>
-            {/* Form Header */}
-            <Box display="flex" justifyContent="space-between" alignItems="center" px={3} py={2}
-                sx={{ borderBottom: "1px solid", borderColor: "divider" }}>
-                <Box>
-                    <Typography variant="h6" fontWeight="700">
-                        {editId ? "Edit Department" : "New Department"}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                        {editId ? "Update department details" : "Fill in the form to create a department"}
-                    </Typography>
-                </Box>
-                {editId && (
-                    <Tooltip title="Clear / New">
-                        <IconButton size="small" onClick={handleNew}>
-                            <Close fontSize="small" />
-                        </IconButton>
-                    </Tooltip>
-                )}
-            </Box>
+      {/* Create / Edit Department Modal */}
+      <Modal
+        title={
+          <span style={{ fontWeight: 700, fontSize: "1.1rem", color: "#0f172a" }}>
+            {editingDept ? "Edit Department" : "Add New Department"}
+          </span>
+        }
+        open={modalOpen}
+        onCancel={() => setModalOpen(false)}
+        footer={null}
+        width={500}
+        centered
+        styles={{ content: { borderRadius: 16, background: "#ffffff" } }}
+      >
+        {formError && <Alert message={formError} type="error" showIcon style={{ marginBottom: 16, borderRadius: 8 }} />}
 
-            {/* Form Fields */}
-            <Box px={3} py={3} display="flex" flexDirection="column" gap={2.5}>
-                {formError && <Alert severity="error" sx={{ borderRadius: 2 }}>{formError}</Alert>}
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleFormSubmit}
+          requiredMark={true}
+          style={{ marginTop: 16 }}
+        >
+          <Form.Item
+            name="name"
+            label={<span style={{ color: "#475569", fontWeight: 600 }}>Department Name</span>}
+            rules={[{ required: true, message: "Department Name is required." }]}
+          >
+            <Input placeholder="e.g. Information Technology" size="large" style={{ borderRadius: 8 }} />
+          </Form.Item>
 
-                <AppTextField name="name" control={control} label="Department Name *" />
-                <AppTextField name="code" control={control} label="Department Code *"
-                    inputProps={{ style: { textTransform: "uppercase" } }} />
-                <AppTextField name="description" control={control} label="Description"
-                    multiline rows={3} />
+          <Form.Item
+            name="code"
+            label={<span style={{ color: "#475569", fontWeight: 600 }}>Department Code</span>}
+            rules={[{ required: true, message: "Department Code is required." }]}
+          >
+            <Input placeholder="e.g. IT" size="large" style={{ borderRadius: 8, textTransform: "uppercase" }} />
+          </Form.Item>
 
-                <Controller
-                    name="active"
-                    control={control}
-                    render={({ field }) => (
-                        <FormControlLabel
-                            control={<Switch checked={!!field.value} onChange={field.onChange} color="success" />}
-                            label={<Typography variant="body2" fontWeight="600">Active</Typography>}
-                        />
-                    )}
-                />
-            </Box>
+          <Form.Item
+            name="description"
+            label={<span style={{ color: "#475569", fontWeight: 600 }}>Description (Optional)</span>}
+          >
+            <TextArea placeholder="Brief description of department function" rows={3} style={{ borderRadius: 8 }} />
+          </Form.Item>
 
-            <Divider />
-            <Box display="flex" gap={1.5} px={3} py={2} justifyContent="flex-end">
-                <AppButton type="button" variant="outlined" color="inherit" onClick={handleNew} disabled={saving}>
-                    Clear
-                </AppButton>
-                <AppButton type="submit" loading={saving} startIcon={editId ? <Save /> : <Add />}>
-                    {editId ? "Update" : "Create Department"}
-                </AppButton>
-            </Box>
-        </Box>
-    );
+          <Form.Item
+            name="active"
+            valuePropName="checked"
+            label={<span style={{ color: "#475569", fontWeight: 600 }}>Active Status</span>}
+          >
+            <Switch checkedChildren="Active" unCheckedChildren="Inactive" />
+          </Form.Item>
 
-    return (
-        <>
-            <MasterPage
-                title="Departments"
-                subtitle="Manage organisational departments"
-                breadcrumbs={[{ label: "Master Registry" }, { label: "Departments" }]}
-                action={
-                    <AppButton startIcon={<Add />} onClick={handleNew}>
-                        New Department
-                    </AppButton>
-                }
-                gridPanel={gridPanel}
-                formPanel={formPanel}
-            />
-            <DeleteDialog
-                open={!!deleteTarget}
-                onClose={() => setDeleteTarget(null)}
-                onConfirm={handleDeleteConfirm}
-                loading={deleting}
-                message={`Delete department "${deleteTarget?.name}"? This action cannot be undone.`}
-            />
-        </>
-    );
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 16 }}>
+            <Button onClick={() => setModalOpen(false)} style={{ borderRadius: 8 }} disabled={saving}>
+              Cancel
+            </Button>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={saving}
+              style={{
+                borderRadius: 8,
+                fontWeight: 700,
+                background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                border: "none",
+                boxShadow: "0 4px 12px rgba(99, 102, 241, 0.25)"
+              }}
+            >
+              {editingDept ? "Save Changes" : "Create Department"}
+            </Button>
+          </div>
+        </Form>
+      </Modal>
+    </div>
+  );
 }
-
-export default Departments;

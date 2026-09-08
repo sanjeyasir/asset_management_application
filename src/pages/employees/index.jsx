@@ -1,452 +1,884 @@
-import { useState, useEffect, useCallback } from "react";
-import { useForm } from "react-hook-form";
-import { yupResolver } from "@hookform/resolvers/yup";
-import * as yup from "yup";
+import React, { useState, useEffect, useCallback } from "react";
 import {
-    Box, Grid, Typography, IconButton, Divider, Tooltip, Alert, Tabs, Tab, Dialog, DialogTitle, DialogContent, DialogActions, TextField
-} from "@mui/material";
+  Row,
+  Col,
+  Card,
+  Table,
+  Button,
+  Input,
+  Select,
+  Tag,
+  Space,
+  Modal,
+  Form,
+  DatePicker,
+  Tooltip,
+  Typography,
+  Alert,
+  Popconfirm,
+  Tabs,
+  Avatar,
+  Badge
+} from "antd";
 import {
-    Add, Edit, Delete, Save, Close, People, VpnKey
-} from "@mui/icons-material";
-import Avatar from "@mui/material/Avatar";
-import Chip from "@mui/material/Chip";
-
-import AppDataGrid from "../../components/tables/AppDataGrid";
-import AppButton from "../../components/common/AppButton";
-import AppTextField from "../../components/common/AppTextField";
-import AppSelect from "../../components/common/AppSelect";
-import AppDatePicker from "../../components/common/AppDatePicker";
-import DeleteDialog from "../../components/dialogs/DeleteDialog";
-import MasterPage from "../../components/layout/MasterPage";
+  UserAddOutlined,
+  SearchOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  KeyOutlined,
+  TeamOutlined,
+  MailOutlined,
+  PhoneOutlined,
+  ClearOutlined,
+  FileExcelOutlined,
+  CheckCircleOutlined
+} from "@ant-design/icons";
+import dayjs from "dayjs";
+import { useNotification } from "../../contexts/NotificationContext";
+import employeeService from "../../services/employeeService";
+import departmentService from "../../services/departmentService";
+import designationService from "../../services/designationService";
 import authService from "../../services/authService";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { db } from "../../config/firebase";
 
-import employeeService from "../../services/employeeService";
-import departmentService from "../../services/departmentService";
-import designationService from "../../services/designationService";
-import { useNotification } from "../../contexts/NotificationContext";
-
-// Yup Form Validation Schema
-const employeeSchema = yup.object().shape({
-    firstName: yup.string().required("First name is required"),
-    lastName: yup.string().required("Last name is required"),
-    department: yup.string().required("Department is required"),
-    designation: yup.string().required("Designation is required"),
-    email: yup.string().email("Invalid email address").required("Email address is required"),
-    mobileNumber: yup.string().required("Mobile number is required"),
-    dateOfJoin: yup.string().required("Date of join is required"),
-    role: yup.string().required("Role is required"),
-    password: yup.string().notRequired(),
-    status: yup.string().required("Employment status is required"),
-});
-
-const EMPTY_FORM = {
-    firstName: "",
-    lastName: "",
-    department: "",
-    designation: "",
-    email: "",
-    mobileNumber: "",
-    dateOfJoin: "",
-    role: "Employee",
-    password: "",
-    status: "Active"
-};
+const { Title, Text } = Typography;
+const { Option } = Select;
 
 const STATUS_OPTIONS = [
-    { value: "Active", label: "Active" },
-    { value: "On Leave", label: "On Leave" },
-    { value: "Terminated", label: "Terminated" }
+  { value: "Active", label: "Active" },
+  { value: "On Leave", label: "On Leave" },
+  { value: "Terminated", label: "Terminated" }
 ];
 
-function Employees() {
-    const { showNotification } = useNotification();
-    const [rows, setRows] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [editId, setEditId] = useState(null);
-    const [saving, setSaving] = useState(false);
-    const [deleteTarget, setDeleteTarget] = useState(null);
-    const [deleting, setDeleting] = useState(false);
-    const [formError, setFormError] = useState("");
-    const [departments, setDepartments] = useState([]);
-    const [designations, setDesignations] = useState([]);
+const ROLE_OPTIONS = [
+  { value: "Admin", label: "Admin" },
+  { value: "Manager", label: "Manager" },
+  { value: "Employee", label: "Employee" }
+];
 
-    const [tabIndex, setTabIndex] = useState(0);
-    const [resetRequests, setResetRequests] = useState([]);
-    const [loadingRequests, setLoadingRequests] = useState(false);
-    const [approvalTarget, setApprovalTarget] = useState(null);
-    const [tempPassword, setTempPassword] = useState("");
-    const [approving, setApproving] = useState(false);
-    const [approvalError, setApprovalError] = useState("");
+export default function Employees() {
+  const { showNotification } = useNotification();
+  const [form] = Form.useForm();
+  const [approvalForm] = Form.useForm();
 
-    const { control, handleSubmit, reset } = useForm({
-        resolver: yupResolver(employeeSchema),
-        defaultValues: EMPTY_FORM
+  const [activeTab, setActiveTab] = useState("directory");
+  const [employees, setEmployees] = useState([]);
+  const [resetRequests, setResetRequests] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [loadingRequests, setLoadingRequests] = useState(false);
+  const [departments, setDepartments] = useState([]);
+  const [designations, setDesignations] = useState([]);
+
+  // Search and Filter
+  const [searchText, setSearchText] = useState("");
+  const [departmentFilter, setDepartmentFilter] = useState(null);
+  const [roleFilter, setRoleFilter] = useState(null);
+
+  // Employee Modal
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  // Approval Modal
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approvalTarget, setApprovalTarget] = useState(null);
+  const [approving, setApproving] = useState(false);
+  const [approvalError, setApprovalError] = useState("");
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [emps, depts, desigs] = await Promise.all([
+        employeeService.getEmployees(),
+        departmentService.getDepartments(),
+        designationService.getDesignations()
+      ]);
+      setEmployees(emps);
+      setDepartments(depts.filter((d) => d.active));
+      setDesignations(desigs.filter((d) => d.active));
+    } catch {
+      showNotification("Failed to load employee directory.", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [showNotification]);
+
+  const loadRequests = useCallback(async () => {
+    setLoadingRequests(true);
+    try {
+      const reqQ = query(collection(db, "passwordResetRequests"), orderBy("requestedAt", "desc"));
+      const snap = await getDocs(reqQ);
+      const data = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      setResetRequests(data);
+    } catch (err) {
+      console.error("Failed to load reset requests:", err);
+    } finally {
+      setLoadingRequests(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+    loadRequests();
+  }, [loadData, loadRequests]);
+
+  // Open Create
+  const handleOpenCreate = () => {
+    setEditingEmployee(null);
+    setFormError("");
+    form.resetFields();
+    form.setFieldsValue({
+      role: "Employee",
+      status: "Active"
     });
+    setModalOpen(true);
+  };
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const [emps, depts, desigs] = await Promise.all([
-                employeeService.getEmployees(),
-                departmentService.getDepartments(),
-                designationService.getDesignations(),
-            ]);
-            setRows(emps);
-            setDepartments(depts.filter(d => d.active).map(d => ({ value: d.id, label: d.name })));
-            setDesignations(desigs.filter(d => d.active).map(d => ({ value: d.id, label: d.name })));
-        } catch {
-            showNotification("Failed to load employee data.", "error");
-        } finally {
-            setLoading(false);
+  // Open Edit
+  const handleOpenEdit = (record) => {
+    setEditingEmployee(record);
+    setFormError("");
+    form.resetFields();
+    form.setFieldsValue({
+      firstName: record.firstName,
+      lastName: record.lastName,
+      companyName: record.companyName || "Ravi",
+      email: record.email,
+      mobileNumber: record.mobileNumber,
+      department: record.department,
+      designation: record.designation,
+      role: record.role || "Employee",
+      status: record.status || "Active",
+      dateOfJoin: record.dateOfJoin ? dayjs(record.dateOfJoin) : null
+    });
+    setModalOpen(true);
+  };
+
+  // Submit Create / Edit
+  const handleFormSubmit = async (values) => {
+    setSaving(true);
+    setFormError("");
+    try {
+      const payload = {
+        ...values,
+        dateOfJoin: values.dateOfJoin ? values.dateOfJoin.format("YYYY-MM-DD") : ""
+      };
+
+      if (editingEmployee) {
+        const { password, ...updatePayload } = payload;
+        await employeeService.updateEmployee(editingEmployee.id, updatePayload);
+        showNotification("Employee profile updated successfully.", "success");
+      } else {
+        if (!values.password || values.password.length < 6) {
+          throw new Error("Initial password must be at least 6 characters.");
         }
-    }, [showNotification]);
+        await employeeService.createEmployee(payload);
+        showNotification("Employee and authentication account created.", "success");
+      }
+      setModalOpen(false);
+      loadData();
+    } catch (e) {
+      setFormError(e.message || "Operation failed.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
-    const loadRequests = useCallback(async () => {
-        setLoadingRequests(true);
-        try {
-            const reqQ = query(collection(db, "passwordResetRequests"), orderBy("requestedAt", "desc"));
-            const snap = await getDocs(reqQ);
-            const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setResetRequests(data);
-        } catch (err) {
-            console.error("Failed to load password reset requests:", err);
-        } finally {
-            setLoadingRequests(false);
-        }
-    }, []);
+  // Delete
+  const handleDelete = async (id, fullName) => {
+    try {
+      await employeeService.deleteEmployee(id);
+      showNotification(`Employee "${fullName}" deleted.`, "success");
+      loadData();
+    } catch (e) {
+      showNotification(e.message || "Failed to delete employee.", "error");
+    }
+  };
 
-    useEffect(() => { 
-        load(); 
-        loadRequests();
-    }, [load, loadRequests]);
+  // Approve Password Reset
+  const handleOpenApprove = (record) => {
+    setApprovalTarget(record);
+    setApprovalError("");
+    approvalForm.resetFields();
+    approvalForm.setFieldsValue({
+      tempPassword: "TempPassword123!"
+    });
+    setApprovalOpen(true);
+  };
 
-    const handleRowClick = (params) => {
-        const r = params.row;
-        setEditId(r.id);
-        setFormError("");
-        reset({
-            firstName: r.firstName || "", lastName: r.lastName || "",
-            department: r.department || "", designation: r.designation || "",
-            email: r.email || "", mobileNumber: r.mobileNumber || "",
-            dateOfJoin: r.dateOfJoin || "", role: r.role || "Employee",
-            password: "", status: r.status || "Active"
-        });
-    };
+  const handleApproveSubmit = async (values) => {
+    setApproving(true);
+    setApprovalError("");
+    try {
+      await authService.approveResetRequest(approvalTarget.id, approvalTarget.email, values.tempPassword);
+      showNotification(`Password reset request for "${approvalTarget.email}" approved.`, "success");
+      setApprovalOpen(false);
+      loadRequests();
+      loadData();
+    } catch (e) {
+      setApprovalError(e.message || "Approval failed.");
+    } finally {
+      setApproving(false);
+    }
+  };
 
-    const handleNew = () => {
-        setEditId(null); setFormError("");
-        reset(EMPTY_FORM);
-    };
+  const handleExportCSV = () => {
+    if (filteredEmployees.length === 0) return;
+    const headers = ["Employee ID", "First Name", "Last Name", "Email", "Mobile", "Department", "Designation", "Role", "Status", "Date Of Join"];
+    const rows = filteredEmployees.map((e) => [
+      `"${e.employeeId || ""}"`,
+      `"${e.firstName || ""}"`,
+      `"${e.lastName || ""}"`,
+      `"${e.email || ""}"`,
+      `"${e.mobileNumber || ""}"`,
+      `"${getDepartmentName(e.department)}"`,
+      `"${getDesignationName(e.designation)}"`,
+      `"${e.role || ""}"`,
+      `"${e.status || ""}"`,
+      `"${e.dateOfJoin || ""}"`
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `employees_export_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
-    const onSubmit = async (data) => {
-        setSaving(true);
-        setFormError("");
-        try {
-            if (editId) {
-                // Remove password from edit payload
-                const { password, ...updateData } = data;
-                await employeeService.updateEmployee(editId, updateData);
-                showNotification("Employee updated successfully.", "success");
-            } else {
-                if (!data.password) {
-                    throw new Error("Initial password is required for new registration.");
-                }
-                if (data.password.length < 6) {
-                    throw new Error("Initial password must be at least 6 characters.");
-                }
-                await employeeService.createEmployee(data);
-                showNotification("Employee and auth account created successfully.", "success");
+  const getDepartmentName = (id) => departments.find((d) => d.id === id)?.name || id || "—";
+  const getDesignationName = (id) => designations.find((d) => d.id === id)?.name || id || "—";
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case "Active": return "success";
+      case "On Leave": return "warning";
+      case "Terminated": return "error";
+      default: return "default";
+    }
+  };
+
+  const getRoleColor = (role) => {
+    switch (role) {
+      case "Admin": return "red";
+      case "Manager": return "purple";
+      case "Employee": return "blue";
+      default: return "default";
+    }
+  };
+
+  const filteredEmployees = employees.filter((emp) => {
+    const fullName = `${emp.firstName || ""} ${emp.lastName || ""}`.toLowerCase();
+    const matchSearch =
+      !searchText ||
+      fullName.includes(searchText.toLowerCase()) ||
+      emp.email?.toLowerCase().includes(searchText.toLowerCase()) ||
+      emp.employeeId?.toLowerCase().includes(searchText.toLowerCase()) ||
+      emp.mobileNumber?.includes(searchText);
+
+    const matchDept = !departmentFilter || emp.department === departmentFilter;
+    const matchRole = !roleFilter || emp.role === roleFilter;
+
+    return matchSearch && matchDept && matchRole;
+  });
+
+  const pendingRequestsCount = resetRequests.filter((r) => r.status === "Pending").length;
+
+  const employeeColumns = [
+    {
+      title: "Employee Profile",
+      key: "profile",
+      render: (_, record) => {
+        const initials = `${record.firstName?.[0] || ""}${record.lastName?.[0] || ""}`.toUpperCase();
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Avatar style={{ backgroundColor: "#6366f1", fontWeight: 700, flexShrink: 0 }}>
+              {initials || <TeamOutlined />}
+            </Avatar>
+            <div>
+              <div style={{ fontWeight: 700, color: "#0f172a", fontSize: "0.92rem" }}>
+                {record.firstName} {record.lastName}
+              </div>
+              <div style={{ fontSize: "0.78rem", color: "#64748b" }}>
+                {record.email}
+              </div>
+            </div>
+          </div>
+        );
+      }
+    },
+    {
+      title: "Company",
+      dataIndex: "companyName",
+      key: "companyName",
+      render: (comp) => (
+        <Tag color="blue" style={{ fontWeight: 600 }}>
+          {comp || "Ravi"}
+        </Tag>
+      )
+    },
+    {
+      title: "Employee ID",
+      dataIndex: "employeeId",
+      key: "employeeId",
+      render: (id) => (
+        <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#475569", background: "#f1f5f9", padding: "3px 8px", borderRadius: 6 }}>
+          {id || "—"}
+        </span>
+      )
+    },
+    {
+      title: "Department",
+      dataIndex: "department",
+      key: "department",
+      render: (deptId) => (
+        <Tag color="purple" style={{ fontWeight: 600 }}>
+          {getDepartmentName(deptId)}
+        </Tag>
+      )
+    },
+    {
+      title: "Designation",
+      dataIndex: "designation",
+      key: "designation",
+      render: (desigId) => (
+        <span style={{ fontWeight: 500, color: "#334155" }}>
+          {getDesignationName(desigId)}
+        </span>
+      )
+    },
+    {
+      title: "Role",
+      dataIndex: "role",
+      key: "role",
+      render: (role) => (
+        <Tag color={getRoleColor(role || "Employee")}>
+          {role || "Employee"}
+        </Tag>
+      )
+    },
+    {
+      title: "Status",
+      dataIndex: "status",
+      key: "status",
+      render: (status) => (
+        <Tag color={getStatusColor(status)}>
+          {status || "Active"}
+        </Tag>
+      )
+    },
+    {
+      title: "Actions",
+      key: "actions",
+      align: "right",
+      render: (_, record) => (
+        <Space size="small">
+          <Tooltip title="Edit Profile">
+            <Button
+              type="text"
+              icon={<EditOutlined style={{ color: "#10b981", fontSize: 16 }} />}
+              onClick={() => handleOpenEdit(record)}
+            />
+          </Tooltip>
+          <Tooltip title="Delete Employee">
+            <Popconfirm
+              title="Delete Employee"
+              description={`Delete "${record.firstName} ${record.lastName}"? Account access will be revoked.`}
+              onConfirm={() => handleDelete(record.id, `${record.firstName} ${record.lastName}`)}
+              okText="Delete"
+              cancelText="Cancel"
+              okButtonProps={{ danger: true }}
+            >
+              <Button type="text" danger icon={<DeleteOutlined style={{ fontSize: 16 }} />} />
+            </Popconfirm>
+          </Tooltip>
+        </Space>
+      )
+    }
+  ];
+
+  const requestColumns = [
+    {
+      title: "Requester Email",
+      dataIndex: "email",
+      key: "email",
+      render: (text, record) => (
+        <div>
+          <div style={{ fontWeight: 700, color: "#0f172a" }}>{record.fullName || "Staff Member"}</div>
+          <div style={{ color: "#64748b", fontSize: "0.8rem" }}>{text}</div>
+        </div>
+      )
+    },
+    {
+      title: "Requested Date",
+      dataIndex: "requestedAt",
+      key: "requestedAt",
+      render: (date) => (
+        <span style={{ fontSize: "0.85rem", color: "#475569" }}>
+          {date ? new Date(date).toLocaleString() : "—"}
+        </span>
+      )
+    },
+    {
+      title: "Request Status",
+      dataIndex: "status",
+      key: "status",
+      render: (status) => (
+        <Tag color={status === "Approved" ? "success" : "warning"} style={{ fontWeight: 600 }}>
+          {status || "Pending"}
+        </Tag>
+      )
+    },
+    {
+      title: "Actions",
+      key: "actions",
+      align: "right",
+      render: (_, record) => (
+        record.status === "Pending" ? (
+          <Button
+            type="primary"
+            icon={<KeyOutlined />}
+            size="small"
+            onClick={() => handleOpenApprove(record)}
+            style={{
+              borderRadius: 6,
+              background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+              border: "none",
+              fontWeight: 600
+            }}
+          >
+            Approve & Reset
+          </Button>
+        ) : (
+          <Tag icon={<CheckCircleOutlined />} color="success">
+            Approved
+          </Tag>
+        )
+      )
+    }
+  ];
+
+  return (
+    <div style={{ paddingBottom: 24 }}>
+      {/* Page Header */}
+      <Row justify="space-between" align="middle" style={{ marginBottom: 24 }}>
+        <Col>
+          <Title level={2} style={{ margin: 0, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>
+            Employees & Access Control
+          </Title>
+          <Text type="secondary" style={{ fontSize: "0.92rem" }}>
+            Maintain corporate staff profiles, role privileges, and password reset requests.
+          </Text>
+        </Col>
+        <Col>
+          <Space>
+            <Button
+              icon={<FileExcelOutlined />}
+              onClick={handleExportCSV}
+              style={{ borderRadius: 8, fontWeight: 600 }}
+            >
+              Export CSV
+            </Button>
+            <Button
+              type="primary"
+              icon={<UserAddOutlined />}
+              onClick={handleOpenCreate}
+              size="large"
+              style={{
+                borderRadius: 8,
+                background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                border: "none",
+                fontWeight: 700,
+                boxShadow: "0 4px 12px rgba(99, 102, 241, 0.25)"
+              }}
+            >
+              New Employee
+            </Button>
+          </Space>
+        </Col>
+      </Row>
+
+      {/* Tabs */}
+      <Card
+        bordered
+        style={{ borderRadius: 16, border: "1px solid #e2e8f0" }}
+        styles={{ body: { padding: "12px 24px 24px 24px" } }}
+      >
+        <Tabs
+          activeKey={activeTab}
+          onChange={(key) => setActiveTab(key)}
+          items={[
+            {
+              key: "directory",
+              label: (
+                <span style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+                  <TeamOutlined /> Employee Directory ({employees.length})
+                </span>
+              ),
+              children: (
+                <div>
+                  {/* Search and Filters */}
+                  <Row gutter={[16, 16]} style={{ marginBottom: 20, marginTop: 8 }} align="middle">
+                    <Col xs={24} sm={10} md={8}>
+                      <Input
+                        prefix={<SearchOutlined style={{ color: "#94a3b8" }} />}
+                        placeholder="Search by name, email, badge ID..."
+                        value={searchText}
+                        onChange={(e) => setSearchText(e.target.value)}
+                        allowClear
+                        style={{ borderRadius: 8 }}
+                      />
+                    </Col>
+                    <Col xs={12} sm={7} md={5}>
+                      <Select
+                        placeholder="Filter by Department"
+                        value={departmentFilter}
+                        onChange={(val) => setDepartmentFilter(val)}
+                        allowClear
+                        style={{ width: "100%", borderRadius: 8 }}
+                      >
+                        {departments.map((d) => (
+                          <Option key={d.id} value={d.id}>
+                            {d.name}
+                          </Option>
+                        ))}
+                      </Select>
+                    </Col>
+                    <Col xs={12} sm={7} md={5}>
+                      <Select
+                        placeholder="Filter by Role"
+                        value={roleFilter}
+                        onChange={(val) => setRoleFilter(val)}
+                        allowClear
+                        style={{ width: "100%", borderRadius: 8 }}
+                      >
+                        {ROLE_OPTIONS.map((r) => (
+                          <Option key={r.value} value={r.value}>
+                            {r.label}
+                          </Option>
+                        ))}
+                      </Select>
+                    </Col>
+                    {(searchText || departmentFilter || roleFilter) && (
+                      <Col>
+                        <Button
+                          icon={<ClearOutlined />}
+                          onClick={() => {
+                            setSearchText("");
+                            setDepartmentFilter(null);
+                            setRoleFilter(null);
+                          }}
+                        >
+                          Clear
+                        </Button>
+                      </Col>
+                    )}
+                  </Row>
+
+                  <Table
+                    dataSource={filteredEmployees}
+                    columns={employeeColumns}
+                    rowKey="id"
+                    loading={loading}
+                    pagination={{
+                      pageSize: 10,
+                      showSizeChanger: true,
+                      showTotal: (total) => `Total ${total} employees`
+                    }}
+                    scroll={{ x: 900 }}
+                  />
+                </div>
+              )
+            },
+            {
+              key: "requests",
+              label: (
+                <span style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+                  <KeyOutlined /> Password Reset Requests
+                  {pendingRequestsCount > 0 && (
+                    <Badge count={pendingRequestsCount} style={{ backgroundColor: "#ef4444" }} />
+                  )}
+                </span>
+              ),
+              children: (
+                <div style={{ marginTop: 12 }}>
+                  <Table
+                    dataSource={resetRequests}
+                    columns={requestColumns}
+                    rowKey="id"
+                    loading={loadingRequests}
+                    pagination={{ pageSize: 10 }}
+                    locale={{ emptyText: "No pending password reset requests" }}
+                  />
+                </div>
+              )
             }
-            handleNew();
-            load();
-        } catch (e) {
-            setFormError(e.message || "An error occurred.");
-        } finally {
-            setSaving(false);
+          ]}
+        />
+      </Card>
+
+      {/* Register / Edit Employee Modal */}
+      <Modal
+        title={
+          <span style={{ fontWeight: 700, fontSize: "1.1rem", color: "#0f172a" }}>
+            {editingEmployee ? "Edit Employee Profile" : "Register New Employee"}
+          </span>
         }
-    };
+        open={modalOpen}
+        onCancel={() => setModalOpen(false)}
+        footer={null}
+        width={680}
+        centered
+        styles={{ content: { borderRadius: 16, background: "#ffffff" } }}
+      >
+        {formError && <Alert message={formError} type="error" showIcon style={{ marginBottom: 16, borderRadius: 8 }} />}
 
-    const handleDeleteConfirm = async () => {
-        setDeleting(true);
-        try {
-            await employeeService.deleteEmployee(deleteTarget.id);
-            showNotification(`Employee "${deleteTarget.firstName} ${deleteTarget.lastName}" deleted.`, "success");
-            setDeleteTarget(null);
-            if (editId === deleteTarget.id) handleNew();
-            load();
-        } catch (e) {
-            showNotification(e.message || "Delete failed.", "error");
-        } finally {
-            setDeleting(false);
-        }
-    };
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleFormSubmit}
+          requiredMark={true}
+          style={{ marginTop: 16 }}
+        >
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="firstName"
+                label={<span style={{ color: "#475569", fontWeight: 600 }}>First Name</span>}
+                rules={[{ required: true, message: "First Name is required." }]}
+              >
+                <Input placeholder="John" size="large" style={{ borderRadius: 8 }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="lastName"
+                label={<span style={{ color: "#475569", fontWeight: 600 }}>Last Name</span>}
+                rules={[{ required: true, message: "Last Name is required." }]}
+              >
+                <Input placeholder="Doe" size="large" style={{ borderRadius: 8 }} />
+              </Form.Item>
+            </Col>
+          </Row>
 
-    const handleApproveConfirm = async (e) => {
-        e.preventDefault();
-        if (!tempPassword) {
-            setApprovalError("Temporary password is required.");
-            return;
-        }
-        if (tempPassword.length < 6) {
-            setApprovalError("Password must be at least 6 characters.");
-            return;
-        }
-        setApproving(true);
-        setApprovalError("");
-        try {
-            await authService.approveResetRequest(approvalTarget.id, approvalTarget.email, tempPassword);
-            showNotification(`Password reset request for "${approvalTarget.email}" approved.`, "success");
-            setApprovalTarget(null);
-            setTempPassword("");
-            loadRequests();
-            load();
-        } catch (err) {
-            setApprovalError(err.message || "Failed to approve password reset.");
-        } finally {
-            setApproving(false);
-        }
-    };
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="companyName"
+                label={<span style={{ color: "#475569", fontWeight: 600 }}>Company Entity</span>}
+                rules={[{ required: true, message: "Company is required." }]}
+                initialValue="Ravi"
+              >
+                <Select size="large" style={{ borderRadius: 8 }} showSearch allowClear>
+                  {["Ravi", "Eco Solutions", "Hayleys", "Corporate HQ"].map((c) => (
+                    <Option key={c} value={c}>
+                      🏢 {c}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="email"
+                label={<span style={{ color: "#475569", fontWeight: 600 }}>Email Address</span>}
+                rules={[
+                  { required: true, message: "Email is required." },
+                  { type: "email", message: "Please enter a valid email." }
+                ]}
+              >
+                <Input prefix={<MailOutlined />} placeholder="john.doe@company.com" size="large" style={{ borderRadius: 8 }} />
+              </Form.Item>
+            </Col>
+          </Row>
 
-    const requestColumns = [
-        { field: "email", headerName: "Employee Email", flex: 1.5, renderCell: (p) => (
-            <Box sx={{ py: 1 }}>
-                <Typography variant="body2" fontWeight="700">{p.row.fullName || "—"}</Typography>
-                <Typography variant="caption" color="text.secondary">{p.row.email}</Typography>
-            </Box>
-        )},
-        { field: "requestedAt", headerName: "Requested Date", flex: 1, renderCell: (p) => (
-            <Typography variant="caption" color="text.secondary" fontWeight="500">
-                {p.value ? new Date(p.value).toLocaleString() : "—"}
-            </Typography>
-        )},
-        { field: "status", headerName: "Status", width: 120, renderCell: (p) => (
-            <Chip 
-                label={p.value} 
-                size="small" 
-                color={p.value === "Approved" ? "success" : "warning"} 
-                sx={{ fontWeight: 600 }} 
-            />
-        )},
-        { field: "actions", headerName: "", width: 90, sortable: false, renderCell: (p) => (
-            p.row.status === "Pending" ? (
-                <Tooltip title="Approve & Reset Password">
-                    <IconButton 
-                        size="small" 
-                        color="primary" 
-                        onClick={(e) => { 
-                            e.stopPropagation(); 
-                            setApprovalError("");
-                            setTempPassword("");
-                            setApprovalTarget(p.row); 
-                        }}
-                    >
-                        <VpnKey fontSize="small" />
-                    </IconButton>
-                </Tooltip>
-            ) : null
-        )},
-    ];
+          <Row gutter={16}>
+            <Col span={24}>
+              <Form.Item
+                name="mobileNumber"
+                label={<span style={{ color: "#475569", fontWeight: 600 }}>Mobile Number</span>}
+                rules={[{ required: true, message: "Mobile number is required." }]}
+              >
+                <Input prefix={<PhoneOutlined />} placeholder="+1 (555) 000-0000" size="large" style={{ borderRadius: 8 }} />
+              </Form.Item>
+            </Col>
+          </Row>
 
-    const statusColors = { Active: "success", Terminated: "error", "On Leave": "warning" };
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="department"
+                label={<span style={{ color: "#475569", fontWeight: 600 }}>Department</span>}
+                rules={[{ required: true, message: "Department is required." }]}
+              >
+                <Select placeholder="Select department" size="large" style={{ borderRadius: 8 }}>
+                  {departments.map((d) => (
+                    <Option key={d.id} value={d.id}>
+                      {d.name}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="designation"
+                label={<span style={{ color: "#475569", fontWeight: 600 }}>Designation</span>}
+                rules={[{ required: true, message: "Designation is required." }]}
+              >
+                <Select placeholder="Select designation" size="large" style={{ borderRadius: 8 }}>
+                  {designations.map((d) => (
+                    <Option key={d.id} value={d.id}>
+                      {d.name}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
 
-    const columns = [
-        { field: "fullName", headerName: "Employee", flex: 1.8, renderCell: (p) => {
-            const initials = `${p.row.firstName?.[0] || ""}${p.row.lastName?.[0] || ""}`.toUpperCase();
-            return (
-                <Box display="flex" alignItems="center" gap={1.5} sx={{ py: 1 }}>
-                    <Avatar sx={{ width: 36, height: 36, bgcolor: "primary.main", fontSize: "0.85rem", fontWeight: 700 }}>
-                        {initials || <People fontSize="small" />}
-                    </Avatar>
-                    <Box>
-                        <Typography variant="body2" fontWeight="700">{p.row.firstName} {p.row.lastName}</Typography>
-                        <Typography variant="caption" color="text.secondary">{p.row.email}</Typography>
-                    </Box>
-                </Box>
-            );
-        }},
-        { field: "employeeId", headerName: "ID", width: 100, renderCell: (p) => (
-            <Chip label={p.value} size="small" variant="outlined" sx={{ fontWeight: 700, fontFamily: "monospace" }} />
-        )},
-        { field: "department", headerName: "Department", flex: 1, renderCell: (p) => {
-            const dept = departments.find(d => d.value === p.value);
-            return <Chip label={dept ? dept.label : p.value || "—"} size="small" sx={{ bgcolor: "rgba(99,102,241,0.08)", color: "primary.main", fontWeight: 600 }} />;
-        }},
-        { field: "designation", headerName: "Designation", flex: 1, renderCell: (p) => {
-            const desig = designations.find(d => d.value === p.value);
-            return <Typography variant="caption" color="text.secondary" fontWeight="500">{desig ? desig.label : p.value || "—"}</Typography>;
-        }},
-        { field: "role", headerName: "Role", width: 110, renderCell: (p) => (
-            <Chip label={p.value || "Employee"} size="small" color="primary" variant="outlined" sx={{ fontWeight: 600 }} />
-        )},
-        { field: "status", headerName: "Status", width: 100, renderCell: (p) => (
-            <Chip label={p.value} size="small" color={statusColors[p.value] || "default"} sx={{ fontWeight: 600 }} />
-        )},
-        { field: "actions", headerName: "", width: 90, sortable: false, renderCell: (p) => (
-            <Box display="flex">
-                <Tooltip title="Edit"><IconButton size="small" onClick={(e) => { e.stopPropagation(); handleRowClick({ row: p.row }); }}><Edit fontSize="small" /></IconButton></Tooltip>
-                <Tooltip title="Delete"><IconButton size="small" color="error" onClick={(e) => { e.stopPropagation(); setDeleteTarget(p.row); }}><Delete fontSize="small" /></IconButton></Tooltip>
-            </Box>
-        )},
-    ];
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="role"
+                label={<span style={{ color: "#475569", fontWeight: 600 }}>System Role</span>}
+                rules={[{ required: true, message: "Role is required." }]}
+              >
+                <Select placeholder="Select system role" size="large" style={{ borderRadius: 8 }}>
+                  {ROLE_OPTIONS.map((r) => (
+                    <Option key={r.value} value={r.value}>
+                      {r.label}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="status"
+                label={<span style={{ color: "#475569", fontWeight: 600 }}>Employment Status</span>}
+                rules={[{ required: true, message: "Status is required." }]}
+              >
+                <Select placeholder="Select status" size="large" style={{ borderRadius: 8 }}>
+                  {STATUS_OPTIONS.map((s) => (
+                    <Option key={s.value} value={s.value}>
+                      {s.label}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
 
-    const formPanel = (
-        <Box component="form" onSubmit={handleSubmit(onSubmit)} noValidate>
-            <Box display="flex" justifyContent="space-between" alignItems="center" px={3} py={2}
-                sx={{ borderBottom: "1px solid", borderColor: "divider" }}>
-                <Box>
-                    <Typography variant="h6" fontWeight="700">{editId ? "Edit Employee" : "New Employee"}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                        {editId ? "Update employee profile" : "Register a new employee"}
-                    </Typography>
-                </Box>
-                {editId && <Tooltip title="Clear"><IconButton size="small" onClick={handleNew}><Close fontSize="small" /></IconButton></Tooltip>}
-            </Box>
-
-            <Box px={3} py={2.5} display="flex" flexDirection="column" gap={2}>
-                {formError && <Alert severity="error" sx={{ borderRadius: 2 }}>{formError}</Alert>}
-
-                <Grid container spacing={2}>
-                    <Grid item xs={6}><AppTextField name="firstName" control={control} label="First Name *" size="small" /></Grid>
-                    <Grid item xs={6}><AppTextField name="lastName" control={control} label="Last Name *" size="small" /></Grid>
-                </Grid>
-                <AppSelect name="department" control={control} label="Department *" options={departments} size="small" />
-                <AppSelect name="designation" control={control} label="Designation *" options={designations} size="small" />
-                <AppTextField name="email" control={control} label="Email Address *" type="email" size="small" />
-                <AppTextField name="mobileNumber" control={control} label="Mobile Number *" size="small" />
-                <AppDatePicker name="dateOfJoin" control={control} label="Date of Join *" size="small" />
-                
-                <AppSelect 
-                    name="role" 
-                    control={control} 
-                    label="Role *" 
-                    options={[
-                        { value: "Admin", label: "Admin" },
-                        { value: "Manager", label: "Manager" },
-                        { value: "Employee", label: "Employee" }
-                    ]} 
-                    size="small" 
-                />
-
-                {!editId && (
-                    <AppTextField 
-                        name="password" 
-                        control={control} 
-                        label="Initial Password *" 
-                        type="password" 
-                        size="small" 
-                    />
-                )}
-
-                <AppSelect name="status" control={control} label="Employment Status *" options={STATUS_OPTIONS} size="small" />
-            </Box>
-
-            <Divider />
-            <Box display="flex" gap={1.5} px={3} py={2} justifyContent="flex-end">
-                <AppButton variant="outlined" color="inherit" onClick={handleNew} disabled={saving}>Clear</AppButton>
-                <AppButton type="submit" loading={saving} startIcon={editId ? <Save /> : <Add />}>
-                    {editId ? "Update Employee" : "Register Employee"}
-                </AppButton>
-            </Box>
-        </Box>
-    );
-
-    const gridPanelContent = (
-        <Box display="flex" flexDirection="column" gap={2} height="100%">
-            <Tabs 
-                value={tabIndex} 
-                onChange={(e, val) => setTabIndex(val)}
-                sx={{ borderBottom: 1, borderColor: "divider" }}
-            >
-                <Tab label="Employee Directory" sx={{ fontWeight: 600 }} />
-                <Tab 
-                    label={`Password Reset Requests (${resetRequests.filter(r => r.status === "Pending").length})`} 
-                    sx={{ fontWeight: 600 }} 
-                />
-            </Tabs>
-            
-            {tabIndex === 0 ? (
-                <AppDataGrid 
-                    rows={rows} 
-                    columns={columns} 
-                    loading={loading} 
-                    onRowClick={handleRowClick} 
-                    exportFileName="employees.csv" 
-                    placeholder="Search employees..." 
-                />
-            ) : (
-                <AppDataGrid 
-                    rows={resetRequests} 
-                    columns={requestColumns} 
-                    loading={loadingRequests} 
-                    exportFileName="reset_requests.csv" 
-                    placeholder="Search requests..." 
-                />
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="dateOfJoin"
+                label={<span style={{ color: "#475569", fontWeight: 600 }}>Date of Joining</span>}
+                rules={[{ required: true, message: "Date of joining is required." }]}
+              >
+                <DatePicker size="large" style={{ width: "100%", borderRadius: 8 }} />
+              </Form.Item>
+            </Col>
+            {!editingEmployee && (
+              <Col span={12}>
+                <Form.Item
+                  name="password"
+                  label={<span style={{ color: "#475569", fontWeight: 600 }}>Initial Password</span>}
+                  rules={[
+                    { required: true, message: "Initial password is required." },
+                    { min: 6, message: "Minimum 6 characters." }
+                  ]}
+                >
+                  <Input.Password placeholder="••••••••" size="large" style={{ borderRadius: 8 }} />
+                </Form.Item>
+              </Col>
             )}
-        </Box>
-    );
+          </Row>
 
-    return (
-        <>
-            <MasterPage
-                title="Employees"
-                subtitle="Manage employee records with assignments and profiles"
-                breadcrumbs={[{ label: "Master Registry" }, { label: "Employees" }]}
-                action={<AppButton startIcon={<Add />} onClick={handleNew}>New Employee</AppButton>}
-                gridPanel={gridPanelContent}
-                formPanel={formPanel}
-            />
-            <DeleteDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirm}
-                loading={deleting}
-                message={`Delete employee "${deleteTarget?.firstName} ${deleteTarget?.lastName}"? All associated records will be affected.`} />
-
-            <Dialog 
-                open={!!approvalTarget} 
-                onClose={() => !approving && setApprovalTarget(null)}
-                fullWidth
-                maxWidth="xs"
-                PaperProps={{ sx: { borderRadius: 3 } }}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 12 }}>
+            <Button onClick={() => setModalOpen(false)} style={{ borderRadius: 8 }} disabled={saving}>
+              Cancel
+            </Button>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={saving}
+              style={{
+                borderRadius: 8,
+                fontWeight: 700,
+                background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                border: "none",
+                boxShadow: "0 4px 12px rgba(99, 102, 241, 0.25)"
+              }}
             >
-                <Box component="form" onSubmit={handleApproveConfirm}>
-                    <DialogTitle sx={{ fontWeight: 700, pb: 1 }}>Approve Password Reset</DialogTitle>
-                    <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
-                        <Typography variant="body2" color="text.secondary">
-                            Enter a temporary password for <strong>{approvalTarget?.fullName}</strong> ({approvalTarget?.email}). 
-                            The user will be required to change this password when they sign in.
-                        </Typography>
-                        {approvalError && <Alert severity="error" sx={{ borderRadius: 2 }}>{approvalError}</Alert>}
-                        <TextField
-                            fullWidth
-                            size="small"
-                            label="Temporary Password"
-                            type="text"
-                            value={tempPassword}
-                            onChange={(e) => setTempPassword(e.target.value)}
-                            disabled={approving}
-                            required
-                        />
-                    </DialogContent>
-                    <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
-                        <AppButton 
-                            variant="outlined" 
-                            color="inherit" 
-                            onClick={() => setApprovalTarget(null)}
-                            disabled={approving}
-                        >
-                            Cancel
-                        </AppButton>
-                        <AppButton 
-                            type="submit" 
-                            loading={approving}
-                        >
-                            Confirm Approval
-                        </AppButton>
-                    </DialogActions>
-                </Box>
-            </Dialog>
-        </>
-    );
-}
+              {editingEmployee ? "Save Profile" : "Create Account"}
+            </Button>
+          </div>
+        </Form>
+      </Modal>
 
-export default Employees;
+      {/* Password Reset Approval Modal */}
+      <Modal
+        title={
+          <span style={{ fontWeight: 700, fontSize: "1.1rem", color: "#0f172a" }}>
+            Approve Password Reset Request
+          </span>
+        }
+        open={approvalOpen}
+        onCancel={() => setApprovalOpen(false)}
+        footer={null}
+        width={440}
+        centered
+        styles={{ content: { borderRadius: 16, background: "#ffffff" } }}
+      >
+        {approvalError && <Alert message={approvalError} type="error" showIcon style={{ marginBottom: 16, borderRadius: 8 }} />}
+
+        <div style={{ marginTop: 8, marginBottom: 16 }}>
+          <Text type="secondary">
+            Assign a temporary password for <strong>{approvalTarget?.fullName}</strong> ({approvalTarget?.email}). They will be prompted to change this on their next sign in.
+          </Text>
+        </div>
+
+        <Form
+          form={approvalForm}
+          layout="vertical"
+          onFinish={handleApproveSubmit}
+        >
+          <Form.Item
+            name="tempPassword"
+            label={<span style={{ color: "#475569", fontWeight: 600 }}>Temporary Password</span>}
+            rules={[
+              { required: true, message: "Temporary password is required." },
+              { min: 6, message: "Minimum 6 characters." }
+            ]}
+          >
+            <Input size="large" style={{ borderRadius: 8 }} />
+          </Form.Item>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 16 }}>
+            <Button onClick={() => setApprovalOpen(false)} style={{ borderRadius: 8 }} disabled={approving}>
+              Cancel
+            </Button>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={approving}
+              style={{
+                borderRadius: 8,
+                fontWeight: 700,
+                background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                border: "none"
+              }}
+            >
+              Confirm & Issue Password
+            </Button>
+          </div>
+        </Form>
+      </Modal>
+    </div>
+  );
+}

@@ -62,25 +62,28 @@ export const seedDatabase = async () => {
             }
         }
 
-        // 4. Seed Asset Categories
+        // 4. Seed Asset Categories matching AssetSample.xlsx
         const catSnap = await getDocs(collection(db, "assetCategories"));
-        if (catSnap.empty) {
-            console.log("Seeding asset categories...");
-            const defaultCategories = [
-                { id: "cat-1", name: "Laptops", code: "LAP", parentCategory: "", description: "Notebook computers", active: true, createdAt: new Date().toISOString() },
-                { id: "cat-2", name: "Monitors", code: "MON", parentCategory: "", description: "Computer screens", active: true, createdAt: new Date().toISOString() },
-                { id: "cat-3", name: "Printers", code: "PRN", parentCategory: "", description: "Office printers", active: true, createdAt: new Date().toISOString() }
-            ];
-            for (const c of defaultCategories) {
-                await setDoc(doc(db, "assetCategories", c.id), {
-                    name: c.name,
-                    code: c.code,
-                    parentCategory: c.parentCategory,
-                    description: c.description,
-                    active: c.active,
-                    createdAt: c.createdAt
-                });
-            }
+        const sampleCategories = [
+            { id: "cat-laptops", name: "Laptops", code: "LAP", parentCategory: "", description: "Notebook & Laptop Computers", active: true, createdAt: new Date().toISOString() },
+            { id: "cat-desktops", name: "Desktops", code: "DSK", parentCategory: "", description: "Workstations & Desktop Computers with Monitors", active: true, createdAt: new Date().toISOString() },
+            { id: "cat-servers", name: "Servers", code: "SRV", parentCategory: "", description: "Data Center & Enterprise Rack Servers", active: true, createdAt: new Date().toISOString() },
+            { id: "cat-network", name: "Network Equipments", code: "NET", parentCategory: "", description: "Routers, Managed Switches, Firewalls & APs", active: true, createdAt: new Date().toISOString() },
+            { id: "cat-projectors", name: "Projectors", code: "PRJ", parentCategory: "", description: "AV Projectors & Meeting Room Displays", active: true, createdAt: new Date().toISOString() },
+            { id: "cat-dongles", name: "Dongles", code: "DNG", parentCategory: "", description: "4G/5G Dongles, Pocket WiFi & SIM Routers", active: true, createdAt: new Date().toISOString() },
+            { id: "cat-other", name: "Other Assets", code: "OTH", parentCategory: "", description: "Printers, UPS, Scanners & Biometrics", active: true, createdAt: new Date().toISOString() }
+        ];
+
+        // Seed or update each category
+        for (const c of sampleCategories) {
+            await setDoc(doc(db, "assetCategories", c.id), {
+                name: c.name,
+                code: c.code,
+                parentCategory: c.parentCategory,
+                description: c.description,
+                active: c.active,
+                createdAt: c.createdAt
+            }, { merge: true });
         }
 
         console.log("DB seeding check completed successfully!");
